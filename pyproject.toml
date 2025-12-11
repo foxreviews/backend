@@ -137,6 +137,7 @@ dev = [
     "django-extensions==4.1",
     "django-stubs[compatible-mypy]==5.2.7",
     "djangorestframework-stubs==3.16.5",
+    "django-phonenumber-field[phonenumbers]",
     "djlint==1.36.4",
     "factory-boy==3.3.2",
     "ipdb==0.13.13",
