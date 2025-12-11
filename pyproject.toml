@@ -178,6 +178,7 @@ dependencies = [
     "django-crispy-forms==2.5",
     "django-environ==0.12.0",
     "django-model-utils==5.0.0",
+    "django-phonenumber-field[phonenumbers]==8.0.0",
     "django-redis==6.0.0",
     "django-storages[s3]==1.14.6",
     "djangorestframework==3.16.1",
@@ -190,7 +191,9 @@ dependencies = [
     "python-slugify==8.0.4",
     "rcssmin==1.1.2",
     "redis==7.1.0",
+    "requests==2.32.3",
     "sentry-sdk==2.46.0",
+    "stripe==12.1.0",
     "uvicorn-worker==0.4.0",
     "uvicorn[standard]==0.38.0",
 ]

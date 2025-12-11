@@ -15,6 +15,27 @@ READ_DOT_ENV_FILE = env.bool("DJANGO_READ_DOT_ENV_FILE", default=False)
 if READ_DOT_ENV_FILE:
     # OS environment variables take precedence over variables from .env
     env.read_env(str(BASE_DIR / ".env"))
+else:
+    # Charge les fichiers .envs/ en fonction de l'environnement
+    # DJANGO_SETTINGS_MODULE détermine l'environnement (local ou production)
+    # En Docker, ces fichiers sont chargés par docker-compose
+    import os
+    settings_module = os.environ.get("DJANGO_SETTINGS_MODULE", "config.settings.local")
+    
+    if "production" in settings_module:
+        env_type = ".production"
+    else:
+        env_type = ".local"
+    
+    envs_dir = BASE_DIR / ".envs" / env_type
+    if envs_dir.exists():
+        django_env = envs_dir / ".django"
+        postgres_env = envs_dir / ".postgres"
+        
+        if django_env.exists():
+            env.read_env(str(django_env))
+        if postgres_env.exists():
+            env.read_env(str(postgres_env))
 
 # GENERAL
 # ------------------------------------------------------------------------------
@@ -46,8 +67,18 @@ LOCALE_PATHS = [str(BASE_DIR / "locale")]
 # DATABASES
 # ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/ref/settings/#databases
-DATABASES = {"default": env.db("DATABASE_URL")}
-DATABASES["default"]["ATOMIC_REQUESTS"] = True
+# Construction manuelle de la configuration pour éviter les problèmes d'encodage avec DATABASE_URL
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": env("POSTGRES_DB", default="foxreviews"),
+        "USER": env("POSTGRES_USER", default="debug"),
+        "PASSWORD": env("POSTGRES_PASSWORD", default="debug"),
+        "HOST": env("POSTGRES_HOST", default="localhost"),
+        "PORT": env("POSTGRES_PORT", default="5432"),
+        "ATOMIC_REQUESTS": True,
+    }
+}
 # https://docs.djangoproject.com/en/stable/ref/settings/#std:setting-DEFAULT_AUTO_FIELD
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -87,6 +118,14 @@ THIRD_PARTY_APPS = [
 
 LOCAL_APPS = [
     "foxreviews.users",
+    "foxreviews.core",
+    "foxreviews.userprofile",
+    "foxreviews.category",
+    "foxreviews.subcategory",
+    "foxreviews.location",
+    "foxreviews.enterprise",
+    "foxreviews.reviews",
+    "foxreviews.sponsorisation",
     # Your stuff: custom apps go here
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
@@ -339,6 +378,13 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
 }
 
 # django-cors-headers - https://github.com/adamchainz/django-cors-headers#setup
@@ -347,11 +393,29 @@ CORS_URLS_REGEX = r"^/api/.*$"
 # By Default swagger ui is available only to admin user(s). You can change permission classes to change that
 # See more configuration options at https://drf-spectacular.readthedocs.io/en/latest/settings.html#settings
 SPECTACULAR_SETTINGS = {
-    "TITLE": "foxreviews API",
-    "DESCRIPTION": "Documentation of API endpoints of foxreviews",
+    "TITLE": "FOX-Reviews API",
+    "DESCRIPTION": "Documentation of API endpoints of FOX-Reviews",
     "VERSION": "1.0.0",
     "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAdminUser"],
     "SCHEMA_PATH_PREFIX": "/api/",
 }
+
+# FOX-Reviews Configuration
+# ------------------------------------------------------------------------------
+# FastAPI IA Service
+FASTAPI_BASE_URL = env.str("FASTAPI_BASE_URL", default="http://localhost:8080")
+FASTAPI_API_KEY = env.str("FASTAPI_API_KEY", default="")
+FASTAPI_TIMEOUT = env.int("FASTAPI_TIMEOUT", default=60)
+
+# Stripe Payment
+STRIPE_SECRET_KEY = env.str("STRIPE_SECRET_KEY", default="")
+STRIPE_WEBHOOK_SECRET = env.str("STRIPE_WEBHOOK_SECRET", default="")
+STRIPE_SPONSORSHIP_PRICE_ID = env.str("STRIPE_SPONSORSHIP_PRICE_ID", default="")
+
+# Legacy AI API (deprecated - use FASTAPI instead)
+AI_API_BASE_URL = env.str("AI_API_BASE_URL", default="http://localhost:8080/api/v1")
+AI_API_KEY = env.str("AI_API_KEY", default="")
+AI_API_TIMEOUT = env.int("AI_API_TIMEOUT", default=30)
+
 # Your stuff...
 # ------------------------------------------------------------------------------
