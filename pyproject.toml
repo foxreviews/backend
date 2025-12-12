@@ -147,7 +147,7 @@ dev = [
     "pytest-django==4.11.1",
     "pytest-sugar==1.1.1",
     "ruff==0.14.6",
-    "sphinx==8.2.3",
+    "sphinx==9.0.4",
     "sphinx-autobuild==2025.8.25",
     "watchfiles==1.1.1",
     "werkzeug[watchdog]==3.1.3",
