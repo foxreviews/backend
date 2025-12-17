@@ -1,8 +1,11 @@
 """
 URLs pour l'API Category.
 """
-from django.urls import path, include
+
+from django.urls import include
+from django.urls import path
 from rest_framework.routers import DefaultRouter
+
 from foxreviews.category.api.views import CategorieViewSet
 
 app_name = "category"

@@ -1,22 +1,22 @@
 """
 ViewSets pour l'app Sponsorisation.
 """
-from rest_framework import filters
+
 from django_filters.rest_framework import DjangoFilterBackend
-from foxreviews.core.viewsets import CRUDViewSet
+from rest_framework import filters
+
 from foxreviews.core.pagination import ResultsPageNumberPagination
 from foxreviews.core.permissions import IsAdminOrReadOnly
+from foxreviews.core.viewsets import CRUDViewSet
+from foxreviews.sponsorisation.api.serializers import SponsorisationDetailSerializer
+from foxreviews.sponsorisation.api.serializers import SponsorisationListSerializer
 from foxreviews.sponsorisation.models import Sponsorisation
-from foxreviews.sponsorisation.api.serializers import (
-    SponsorisationListSerializer,
-    SponsorisationDetailSerializer,
-)
 
 
 class SponsorisationViewSet(CRUDViewSet):
     """
     ViewSet pour Sponsorisation.
-    
+
     Permissions: ADMIN uniquement (gestion des sponsorisations).
     """
 

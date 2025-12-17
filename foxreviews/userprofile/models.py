@@ -1,7 +1,8 @@
 import uuid
+
 from django.conf import settings
-from django.db import models
 from django.contrib.postgres.fields import ArrayField
+from django.db import models
 from django.utils.translation import gettext_lazy as _
 from phonenumber_field.modelfields import PhoneNumberField
 
@@ -10,9 +11,9 @@ User = settings.AUTH_USER_MODEL
 
 class UserProfile(models.Model):
     """Profil étendu lié 1–1 au User pour données personnelles.
-    
+
     🔐 4 RÔLES UNIQUEMENT (simples, efficaces, propres):
-    
+
     1️⃣ ADMIN - Super user, accès total:
        ✅ Gérer les utilisateurs
        ✅ Gérer les entreprises
@@ -22,7 +23,7 @@ class UserProfile(models.Model):
        ✅ Voir tous les logs / stats
        ✅ Accéder à toutes les API internes (IA, import)
        ✅ Supprimer ou désactiver des contenus
-    
+
     2️⃣ MANAGER - Admin limité, gestion contenu uniquement:
        ✅ Gérer les entreprises (édition, validation, désactivation)
        ✅ Gérer les avis décryptés
@@ -33,7 +34,7 @@ class UserProfile(models.Model):
        ❌ Modifier la configuration système
        ❌ Accéder aux logs techniques internes
        ❌ Toucher au modèle automatique d'import
-    
+
     3️⃣ CLIENT - Entreprise inscrite, tableau de bord uniquement:
        ✅ Voir son entreprise et statut sponsorisé
        ✅ Voir ses stats (clics, impressions, position rotation)
@@ -45,7 +46,7 @@ class UserProfile(models.Model):
        ❌ Voir les autres entreprises
        ❌ Accéder aux données internes
        ❌ Modifier la rotation
-    
+
     4️⃣ VISITEUR - Pas de UserProfile (anonyme), accès public uniquement:
        ✅ Utiliser le moteur de recherche
        ✅ Consulter les pages pros
@@ -57,6 +58,7 @@ class UserProfile(models.Model):
 
     class Role(models.TextChoices):
         """3 rôles authentifiés (VISITEUR = pas de UserProfile)."""
+
         ADMIN = "admin", _("Admin")
         MANAGER = "manager", _("Manager")
         CLIENT = "client", _("Client")
@@ -105,7 +107,7 @@ class UserProfile(models.Model):
 
     # Health & Preferences
     dietary_restrictions = ArrayField(
-        base_field=models.CharField(max_length=100), blank=True, default=list
+        base_field=models.CharField(max_length=100), blank=True, default=list,
     )
     medical_conditions = models.TextField(blank=True)
     preferences = models.JSONField(default=dict, blank=True)

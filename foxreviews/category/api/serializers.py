@@ -1,7 +1,9 @@
 """
 Serializers pour l'app Category.
 """
+
 from rest_framework import serializers
+
 from foxreviews.category.models import Categorie
 
 
@@ -36,4 +38,4 @@ class CategorieDetailSerializer(CategorieSerializer):
     sous_categories = SousCategorieListSerializer(many=True, read_only=True)
 
     class Meta(CategorieSerializer.Meta):
-        fields = CategorieSerializer.Meta.fields + ["sous_categories"]
+        fields = [*CategorieSerializer.Meta.fields, "sous_categories"]

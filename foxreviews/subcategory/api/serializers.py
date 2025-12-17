@@ -1,7 +1,9 @@
 """
 Serializers pour l'app SubCategory.
 """
+
 from rest_framework import serializers
+
 from foxreviews.subcategory.models import SousCategorie
 
 
@@ -29,7 +31,4 @@ class SousCategorieDetailSerializer(SousCategorieListSerializer):
     """Serializer détaillé pour SousCategorie."""
 
     class Meta(SousCategorieListSerializer.Meta):
-        fields = SousCategorieListSerializer.Meta.fields + [
-            "description",
-            "mots_cles",
-        ]
+        fields = [*SousCategorieListSerializer.Meta.fields, "description", "mots_cles"]

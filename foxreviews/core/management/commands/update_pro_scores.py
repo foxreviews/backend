@@ -2,8 +2,10 @@
 Management command: Recalculer les scores de toutes les ProLocalisations.
 Usage: python manage.py update_pro_scores
 """
+
 from django.core.management.base import BaseCommand
-from foxreviews.core.models import ProLocalisation
+
+from foxreviews.enterprise.models import ProLocalisation
 
 
 class Command(BaseCommand):
@@ -35,6 +37,4 @@ class Command(BaseCommand):
             if count % 100 == 0:
                 self.stdout.write(f"  {count}/{total} traité(s)...")
 
-        self.stdout.write(
-            self.style.SUCCESS(f"✓ {count} score(s) recalculé(s)")
-        )
+        self.stdout.write(self.style.SUCCESS(f"✓ {count} score(s) recalculé(s)"))

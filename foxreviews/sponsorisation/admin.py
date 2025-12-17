@@ -1,7 +1,9 @@
 """
 Configuration Admin pour l'app Sponsorisation.
 """
+
 from django.contrib import admin
+
 from foxreviews.sponsorisation.models import Sponsorisation
 
 

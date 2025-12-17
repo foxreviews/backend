@@ -1,5 +1,7 @@
 from django.contrib import admin
-from foxreviews.enterprise.models import Entreprise, ProLocalisation
+
+from foxreviews.enterprise.models import Entreprise
+from foxreviews.enterprise.models import ProLocalisation
 
 
 @admin.register(Entreprise)

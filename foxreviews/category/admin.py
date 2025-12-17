@@ -1,4 +1,5 @@
 from django.contrib import admin
+
 from foxreviews.category.models import Categorie
 
 

@@ -1,7 +1,9 @@
 """
 Serializers pour l'app Sponsorisation.
 """
+
 from rest_framework import serializers
+
 from foxreviews.sponsorisation.models import Sponsorisation
 
 
@@ -54,7 +56,4 @@ class SponsorisationDetailSerializer(SponsorisationListSerializer):
     pro_localisation = ProLocalisationDetailSerializer(read_only=True)
 
     class Meta(SponsorisationListSerializer.Meta):
-        fields = SponsorisationListSerializer.Meta.fields + [
-            "subscription_id",
-            "updated_at",
-        ]
+        fields = [*SponsorisationListSerializer.Meta.fields, "subscription_id", "updated_at"]

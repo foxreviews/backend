@@ -1,46 +1,7 @@
-from rest_framework import mixins, status
+from rest_framework import mixins
 from rest_framework.viewsets import GenericViewSet
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated as DRFIsAuthenticated
-from django.db.models import Q, Prefetch
-from django.utils import timezone
 
 from foxreviews.core.mixins import CreateOrUpdateMixin
-from foxreviews.core.models import (
-    Categorie,
-    SousCategorie,
-    Ville,
-    Entreprise,
-    ProLocalisation,
-    AvisDecrypte,
-    Sponsorisation,
-)
-from foxreviews.core.serializers import (
-    CategorieSerializer,
-    SousCategorieSerializer,
-    SousCategorieDetailSerializer,
-    VilleSerializer,
-    EntrepriseSerializer,
-    EntrepriseListSerializer,
-    ProLocalisationSerializer,
-    ProLocalisationDetailSerializer,
-    AvisDecrypteSerializer,
-    AvisDecrypteCreateSerializer,
-    SponsorisationSerializer,
-    SponsorisationDetailSerializer,
-    SearchResultSerializer,
-    SearchQuerySerializer,
-)
-from foxreviews.core.permissions import (
-    IsAuthenticated,
-    IsAdmin,
-    IsAdminOrReadOnly,
-    IsOwnerOrAdmin,
-    CanManageSponsorship,
-)
-from foxreviews.core.services import SponsorshipService
-from foxreviews.core.ai_service import AIService
 
 
 class CRUDViewSet(

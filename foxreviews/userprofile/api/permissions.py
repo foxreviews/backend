@@ -11,5 +11,5 @@ class RolePermission(BasePermission):
         return bool(
             request.user
             and request.user.is_authenticated
-            and request.user.role in roles
+            and request.user.role in roles,
         )

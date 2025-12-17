@@ -1,19 +1,21 @@
 """
 ViewSets pour l'app Reviews (Avis Décryptés).
 """
-from rest_framework import filters
+
 from django_filters.rest_framework import DjangoFilterBackend
-from foxreviews.core.viewsets import CRUDViewSet
+from rest_framework import filters
+
 from foxreviews.core.pagination import ResultsPageNumberPagination
 from foxreviews.core.permissions import IsAuthenticatedOrReadOnly
-from foxreviews.reviews.models import AvisDecrypte
+from foxreviews.core.viewsets import CRUDViewSet
 from foxreviews.reviews.api.serializers import AvisDecrypteSerializer
+from foxreviews.reviews.models import AvisDecrypte
 
 
 class AvisDecrypteViewSet(CRUDViewSet):
     """
     ViewSet pour AvisDecrypte.
-    
+
     Permissions: Lecture publique, modification authentifiée.
     """
 

@@ -1,7 +1,9 @@
 """
 Serializers pour l'app Reviews (Avis Décryptés).
 """
+
 from rest_framework import serializers
+
 from foxreviews.reviews.models import AvisDecrypte
 
 

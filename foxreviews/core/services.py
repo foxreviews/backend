@@ -1,13 +1,14 @@
 """
 Services métier pour FOX-Reviews.
 """
-from datetime import datetime, timedelta
-from typing import List, Optional
+
+from datetime import timedelta
+
 from django.db import transaction
-from django.db.models import F
 from django.utils import timezone
 
-from foxreviews.core.models import Sponsorisation, ProLocalisation
+from foxreviews.enterprise.models import ProLocalisation
+from foxreviews.sponsorisation.models import Sponsorisation
 
 
 class SponsorshipService:
@@ -20,7 +21,7 @@ class SponsorshipService:
         cls,
         sous_categorie_id: str,
         ville_id: str,
-    ) -> List[ProLocalisation]:
+    ) -> list[ProLocalisation]:
         """
         Récupère les ProLocalisations sponsorisées pour un triplet.
         Logique de rotation: sélectionne celles avec le moins d'impressions.
@@ -39,8 +40,10 @@ class SponsorshipService:
                 date_fin__gte=now,
             )
             .select_related("pro_localisation")
-            .order_by("nb_impressions")  # Rotation par impressions
-            [: cls.MAX_SPONSORS_PER_TRIPLET]
+            .order_by("nb_impressions")[
+                # Rotation par impressions
+                : cls.MAX_SPONSORS_PER_TRIPLET
+            ]
         )
 
         # Incrémenter les impressions pour chaque sponsor sélectionné
@@ -84,12 +87,11 @@ class SponsorshipService:
     def deactivate_expired_sponsorships(cls) -> int:
         """Désactive les sponsorisations expirées. Retourne le nombre désactivé."""
         now = timezone.now()
-        count = Sponsorisation.objects.filter(
+        return Sponsorisation.objects.filter(
             is_active=True,
             date_fin__lt=now,
         ).update(is_active=False)
 
-        return count
 
     @classmethod
     @transaction.atomic
@@ -98,8 +100,8 @@ class SponsorshipService:
         pro_localisation_id: str,
         duration_months: int = 1,
         montant_mensuel: float = 99.00,
-        subscription_id: Optional[str] = None,
-    ) -> Optional[Sponsorisation]:
+        subscription_id: str | None = None,
+    ) -> Sponsorisation | None:
         """
         Crée une nouvelle sponsorisation.
         Vérifie d'abord si le quota de 5 n'est pas atteint.
@@ -114,14 +116,15 @@ class SponsorshipService:
             pro_loc.sous_categorie_id,
             pro_loc.ville_id,
         ):
+            msg = f"Max {cls.MAX_SPONSORS_PER_TRIPLET} sponsors reached for this triplet"
             raise ValueError(
-                f"Max {cls.MAX_SPONSORS_PER_TRIPLET} sponsors reached for this triplet"
+                msg,
             )
 
         now = timezone.now()
         date_fin = now + timedelta(days=30 * duration_months)
 
-        sponso = Sponsorisation.objects.create(
+        return Sponsorisation.objects.create(
             pro_localisation=pro_loc,
             date_debut=now,
             date_fin=date_fin,
@@ -131,7 +134,6 @@ class SponsorshipService:
             statut_paiement="active",
         )
 
-        return sponso
 
     @classmethod
     def update_payment_status(

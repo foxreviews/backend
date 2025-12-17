@@ -1,7 +1,9 @@
 """
 Serializers pour l'app Location (Ville).
 """
+
 from rest_framework import serializers
+
 from foxreviews.location.models import Ville
 
 

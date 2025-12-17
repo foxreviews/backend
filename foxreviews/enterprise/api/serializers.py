@@ -1,8 +1,11 @@
 """
 Serializers pour l'app Enterprise.
 """
+
 from rest_framework import serializers
-from foxreviews.enterprise.models import Entreprise, ProLocalisation
+
+from foxreviews.enterprise.models import Entreprise
+from foxreviews.enterprise.models import ProLocalisation
 
 
 class EntrepriseListSerializer(serializers.ModelSerializer):
@@ -100,14 +103,11 @@ class ProLocalisationDetailSerializer(ProLocalisationListSerializer):
     """Serializer détaillé pour ProLocalisation."""
 
     entreprise = EntrepriseDetailSerializer(read_only=True)
-    from foxreviews.subcategory.api.serializers import SousCategorieDetailSerializer
     from foxreviews.location.api.serializers import VilleSerializer
+    from foxreviews.subcategory.api.serializers import SousCategorieDetailSerializer
 
     sous_categorie = SousCategorieDetailSerializer(read_only=True)
     ville = VilleSerializer(read_only=True)
 
     class Meta(ProLocalisationListSerializer.Meta):
-        fields = ProLocalisationListSerializer.Meta.fields + [
-            "zone_description",
-            "updated_at",
-        ]
+        fields = [*ProLocalisationListSerializer.Meta.fields, "zone_description", "updated_at"]

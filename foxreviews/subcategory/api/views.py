@@ -1,22 +1,22 @@
 """
 ViewSets pour l'app SubCategory.
 """
-from rest_framework import filters
+
 from django_filters.rest_framework import DjangoFilterBackend
-from foxreviews.core.viewsets import CRUDViewSet
+from rest_framework import filters
+
 from foxreviews.core.pagination import ResultsPageNumberPagination
 from foxreviews.core.permissions import IsAdminOrReadOnly
+from foxreviews.core.viewsets import CRUDViewSet
+from foxreviews.subcategory.api.serializers import SousCategorieDetailSerializer
+from foxreviews.subcategory.api.serializers import SousCategorieListSerializer
 from foxreviews.subcategory.models import SousCategorie
-from foxreviews.subcategory.api.serializers import (
-    SousCategorieListSerializer,
-    SousCategorieDetailSerializer,
-)
 
 
 class SousCategorieViewSet(CRUDViewSet):
     """
     ViewSet pour SousCategorie.
-    
+
     Permissions: Lecture publique, modification ADMIN uniquement.
     """
 

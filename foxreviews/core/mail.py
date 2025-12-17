@@ -1,7 +1,7 @@
+
+from django.conf import settings
 from django.core.mail import EmailMessage
 from django.template.loader import render_to_string
-from django.conf import settings
-from typing import Optional
 
 
 class SendMail:
@@ -77,10 +77,10 @@ def send_html_email(
     template_name: str,
     context: dict,
     recipients: list[str],
-    from_email: Optional[str] = None,
-    cc: Optional[list[str]] = None,
-    bcc: Optional[list[str]] = None,
-    attachments: Optional[list[dict]] = None,
+    from_email: str | None = None,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    attachments: list[dict] | None = None,
 ):
     """
     Send HTML email using Django template.
@@ -130,10 +130,11 @@ def get_email_context_base() -> dict:
     """
     return {
         "site_name": "MadaBest",
-        "site_url": settings.SITE_URL if hasattr(settings, "SITE_URL") else "https://madabest.com",
+        "site_url": settings.SITE_URL
+        if hasattr(settings, "SITE_URL")
+        else "https://madabest.com",
         "support_email": "support@madabest.com",
         "company_name": "MadaBest - Agence de Voyage Madagascar",
         "company_address": "Madagascar",
         "year": 2025,
     }
-

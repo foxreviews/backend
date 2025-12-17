@@ -1,22 +1,22 @@
 """
 ViewSets pour l'app Category.
 """
-from rest_framework import filters
+
 from django_filters.rest_framework import DjangoFilterBackend
-from foxreviews.core.viewsets import CRUDViewSet
+from rest_framework import filters
+
+from foxreviews.category.api.serializers import CategorieDetailSerializer
+from foxreviews.category.api.serializers import CategorieSerializer
+from foxreviews.category.models import Categorie
 from foxreviews.core.pagination import ResultsPageNumberPagination
 from foxreviews.core.permissions import IsAdminOrReadOnly
-from foxreviews.category.models import Categorie
-from foxreviews.category.api.serializers import (
-    CategorieSerializer,
-    CategorieDetailSerializer,
-)
+from foxreviews.core.viewsets import CRUDViewSet
 
 
 class CategorieViewSet(CRUDViewSet):
     """
     ViewSet pour Categorie.
-    
+
     Permissions: Lecture publique, modification ADMIN uniquement.
     """
 

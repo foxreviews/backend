@@ -1,16 +1,14 @@
-from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from rest_framework import serializers
 
-from foxreviews.core.models import (
-    Location,
-    Categorie,
-    SousCategorie,
-    Ville,
-    Entreprise,
-    ProLocalisation,
-    AvisDecrypte,
-    Sponsorisation,
-)
+from foxreviews.category.models import Categorie
+from foxreviews.core.models import Location
+from foxreviews.enterprise.models import Entreprise
+from foxreviews.enterprise.models import ProLocalisation
+from foxreviews.location.models import Ville
+from foxreviews.reviews.models import AvisDecrypte
+from foxreviews.sponsorisation.models import Sponsorisation
+from foxreviews.subcategory.models import SousCategorie
 from foxreviews.userprofile.models import UserProfile
 
 User = get_user_model()
@@ -253,23 +251,18 @@ class ProLocalisationDetailSerializer(ProLocalisationSerializer):
     sponsorisations = serializers.SerializerMethodField()
 
     class Meta(ProLocalisationSerializer.Meta):
-        fields = ProLocalisationSerializer.Meta.fields + [
-            "avis_decryptes",
-            "sponsorisations",
-        ]
+        fields = [*ProLocalisationSerializer.Meta.fields, "avis_decryptes", "sponsorisations"]
 
     def get_avis_decryptes(self, obj):
         """Retourne les avis décryptés actifs."""
         avis = obj.avis_decryptes.filter(needs_regeneration=False).order_by(
-            "-date_generation"
+            "-date_generation",
         )[:1]
         return AvisDecrypteSerializer(avis, many=True).data
 
     def get_sponsorisations(self, obj):
         """Retourne les sponsorisations actives."""
-        sponsos = obj.sponsorisations.filter(is_active=True).order_by("-date_debut")[
-            :1
-        ]
+        sponsos = obj.sponsorisations.filter(is_active=True).order_by("-date_debut")[:1]
         return SponsorisationSerializer(sponsos, many=True).data
 
 
@@ -401,4 +394,3 @@ class SearchQuerySerializer(serializers.Serializer):
     ville = serializers.SlugField(required=False, allow_blank=True)
     query = serializers.CharField(required=False, allow_blank=True, max_length=200)
     limit = serializers.IntegerField(default=20, min_value=1, max_value=50)
-

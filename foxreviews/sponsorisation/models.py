@@ -1,26 +1,24 @@
 """
 Modèles pour l'app Sponsorisation.
 """
+
 import uuid
-from django.db import models
+
 from django.core.validators import MinValueValidator
+from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-
-class BaseModel(models.Model):
-    """Modèle de base avec UUID et timestamps."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
+from foxreviews.core.models import BaseModel
 
 
 class Sponsorisation(BaseModel):
     """Sponsorisation d'une ProLocalisation."""
 
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
     pro_localisation = models.ForeignKey(
         "enterprise.ProLocalisation",
         on_delete=models.CASCADE,
@@ -85,21 +83,20 @@ class Sponsorisation(BaseModel):
         ]
 
     def __str__(self):
-        return f"Sponso {self.pro_localisation} - {self.date_debut.strftime('%Y-%m-%d')}"
+        return (
+            f"Sponso {self.pro_localisation} - {self.date_debut.strftime('%Y-%m-%d')}"
+        )
 
     def increment_impression(self):
         """Incrémente le compteur d'impressions."""
         from django.db.models import F
 
         self.__class__.objects.filter(pk=self.pk).update(
-            nb_impressions=F("nb_impressions") + 1
+            nb_impressions=F("nb_impressions") + 1,
         )
 
     def increment_click(self):
         """Incrémente le compteur de clics."""
         from django.db.models import F
 
-        self.__class__.objects.filter(pk=self.pk).update(
-            nb_clicks=F("nb_clicks") + 1
-        )
-
+        self.__class__.objects.filter(pk=self.pk).update(nb_clicks=F("nb_clicks") + 1)

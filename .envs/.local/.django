@@ -2,6 +2,7 @@
 # ------------------------------------------------------------------------------
 USE_DOCKER=yes
 IPYTHONDIR=/app/.ipython
+DATABASE_URL=postgres://postgres:nalisoarab@localhost:5432/foxreviews
 # Redis
 # ------------------------------------------------------------------------------
 REDIS_URL=redis://redis:6379/0
@@ -12,3 +13,8 @@ REDIS_URL=redis://redis:6379/0
 # Flower
 CELERY_FLOWER_USER=debug
 CELERY_FLOWER_PASSWORD=debug
+
+# INSEE Sirene API
+# ------------------------------------------------------------------------------
+INSEE_API_KEY=cf8b21ae-f11c-49d5-8b21-aef11c59d5d4
+INSEE_TIMEOUT=30

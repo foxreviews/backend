@@ -1,0 +1,8 @@
+# INSEE Sirene API Configuration
+# https://api.insee.fr/catalogue/
+
+# API Key INSEE (à obtenir sur https://api.insee.fr/)
+INSEE_API_KEY=cf8b21ae-f11c-49d5-8b21-aef11c59d5d4
+
+# Timeout pour les requêtes INSEE (en secondes)
+INSEE_TIMEOUT=30

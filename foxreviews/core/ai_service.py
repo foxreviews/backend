@@ -2,31 +2,30 @@
 Service d'intégration avec FastAPI FOX-Reviews.
 Communication avec l'API IA pour extraction et génération de contenus.
 """
+
 import logging
+from datetime import timedelta
+from typing import Any
+
 import requests
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
 from django.conf import settings
 from django.utils import timezone
 
-from foxreviews.enterprise.models import ProLocalisation, Entreprise
+from foxreviews.enterprise.models import ProLocalisation
 from foxreviews.reviews.models import AvisDecrypte
-from foxreviews.category.models import Categorie
-from foxreviews.subcategory.models import SousCategorie
-from foxreviews.location.models import Ville
 
 logger = logging.getLogger(__name__)
 
 
 class AIServiceError(Exception):
     """Exception pour erreurs API IA."""
-    pass
+
 
 
 class AIService:
     """
     Service d'intégration avec FastAPI FOX-Reviews.
-    
+
     Endpoints FastAPI:
     - POST /internal/extract: Extraction d'avis via Wextract
     - POST /internal/generate: Génération de tous les contenus IA
@@ -42,7 +41,7 @@ class AIService:
         self.api_key = getattr(settings, "FASTAPI_API_KEY", "")
         self.timeout = getattr(settings, "FASTAPI_TIMEOUT", 60)
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self) -> dict[str, str]:
         """Headers pour authentification FastAPI."""
         headers = {"Content-Type": "application/json"}
         if self.api_key:
@@ -54,7 +53,7 @@ class AIService:
         pro_localisation_id: str,
         texte_brut: str,
         source: str = "google",
-    ) -> Optional[AvisDecrypte]:
+    ) -> AvisDecrypte | None:
         """
         Génère un avis décrypté via l'API IA.
 
@@ -68,10 +67,10 @@ class AIService:
         """
         try:
             pro_loc = ProLocalisation.objects.select_related(
-                "entreprise", "sous_categorie", "ville"
+                "entreprise", "sous_categorie", "ville",
             ).get(id=pro_localisation_id)
         except ProLocalisation.DoesNotExist:
-            logger.error(f"ProLocalisation {pro_localisation_id} not found")
+            logger.exception(f"ProLocalisation {pro_localisation_id} not found")
             return None
 
         # Préparer la requête pour l'API IA
@@ -100,14 +99,16 @@ class AIService:
 
             job_id = job_data.get("job_id")
             if not job_id:
-                raise AIServiceError("No job_id returned by AI API")
+                msg = "No job_id returned by AI API"
+                raise AIServiceError(msg)
 
             # Polling du job (simplifié pour exemple)
             # En production, utiliser Celery task pour polling async
             result = self._poll_job(job_id)
 
             if not result:
-                raise AIServiceError("Job polling failed")
+                msg = "Job polling failed"
+                raise AIServiceError(msg)
 
             # Créer l'AvisDecrypte avec les résultats
             avis = self._create_avis_from_result(
@@ -121,10 +122,13 @@ class AIService:
             return avis
 
         except requests.RequestException as e:
-            logger.error(f"AI API request failed: {e}")
-            raise AIServiceError(f"AI API error: {e}")
+            logger.exception(f"AI API request failed: {e}")
+            msg = f"AI API error: {e}"
+            raise AIServiceError(msg)
 
-    def _poll_job(self, job_id: str, max_attempts: int = 30) -> Optional[Dict[str, Any]]:
+    def _poll_job(
+        self, job_id: str, max_attempts: int = 30,
+    ) -> dict[str, Any] | None:
         """
         Polling du statut d'un job IA.
         Attend jusqu'à ce que status == 'done' ou 'failed'.
@@ -154,7 +158,7 @@ class AIService:
                         return result_response.json()
                     return data
 
-                elif status == "failed":
+                if status == "failed":
                     logger.error(f"Job {job_id} failed: {data.get('error')}")
                     return None
 
@@ -173,7 +177,7 @@ class AIService:
         pro_loc: ProLocalisation,
         texte_brut: str,
         source: str,
-        ai_result: Dict[str, Any],
+        ai_result: dict[str, Any],
     ) -> AvisDecrypte:
         """
         Crée un AvisDecrypte à partir des résultats de l'API IA.
@@ -187,7 +191,7 @@ class AIService:
         # Date d'expiration: 30 jours par défaut
         date_expiration = timezone.now() + timedelta(days=30)
 
-        avis = AvisDecrypte.objects.create(
+        return AvisDecrypte.objects.create(
             entreprise=pro_loc.entreprise,
             pro_localisation=pro_loc,
             texte_brut=texte_brut,
@@ -200,7 +204,6 @@ class AIService:
             confidence_score=confidence,
         )
 
-        return avis
 
     def regenerate_expired_reviews(self) -> int:
         """
@@ -227,6 +230,6 @@ class AIService:
                 )
                 count += 1
             except Exception as e:
-                logger.error(f"Failed to regenerate avis {avis.id}: {e}")
+                logger.exception(f"Failed to regenerate avis {avis.id}: {e}")
 
         return count

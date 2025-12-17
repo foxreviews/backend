@@ -1,0 +1,1470 @@
+openapi: 3.0.3
+info:
+  title: FOX-Reviews API
+  description: |
+    API REST complète pour la plateforme FOX-Reviews.
+    
+    ## Fonctionnalités principales
+    
+    - **Recherche d'entreprises** : Moteur de recherche multicritères (catégorie × sous-catégorie × ville)
+    - **Gestion des entreprises** : CRUD complet avec données INSEE (SIREN/SIRET)
+    - **Avis décryptés IA** : Génération et gestion des avis analysés par intelligence artificielle
+    - **Sponsorisation** : Système de mise en avant avec rotation automatique
+    - **Paiements Stripe** : Gestion des abonnements sponsorisés
+    - **Tableau de bord entreprise** : Statistiques et gestion du profil
+    
+    ## Authentification
+    
+    L'API utilise Token Authentication (Django REST Framework).
+    
+    Pour obtenir un token :
+    ```bash
+    POST /api/auth-token/
+    Body: {"username": "user@example.com", "password": "password"}
+    ```
+    
+    Ensuite, inclure le token dans les requêtes :
+    ```
+    Authorization: Token <votre_token>
+    ```
+    
+    ## Permissions
+    
+    - **Lecture publique** : La plupart des endpoints GET sont accessibles sans authentification
+    - **Modification** : POST/PUT/PATCH/DELETE nécessitent une authentification
+    - **Admin** : Certaines actions réservées aux administrateurs
+    
+    ## Pagination
+    
+    Les listes utilisent la pagination par numéro de page :
+    - `page` : Numéro de la page (défaut: 1)
+    - `page_size` : Taille de la page (défaut: 20, max: 100)
+    
+    Réponse :
+    ```json
+    {
+      "count": 1000,
+      "next": "http://api.example.com/endpoint/?page=2",
+      "previous": null,
+      "results": [...]
+    }
+    ```
+  version: 1.0.0
+  contact:
+    name: FOX-Reviews Support
+    email: support@foxreviews.com
+  license:
+    name: Propriétaire
+
+servers:
+  - url: http://localhost:8000/api
+    description: Développement local
+  - url: https://api.foxreviews.com
+    description: Production
+
+tags:
+  - name: Authentification
+    description: Obtention et gestion des tokens d'authentification
+  - name: Recherche
+    description: Moteur de recherche principal
+  - name: Entreprises
+    description: Gestion des entreprises (données INSEE)
+  - name: ProLocalisations
+    description: Triplet Entreprise × Sous-catégorie × Ville
+  - name: Avis
+    description: Avis décryptés par IA
+  - name: Catégories
+    description: Catégories d'activités
+  - name: Sous-catégories
+    description: Sous-catégories d'activités
+  - name: Villes
+    description: Villes et localisations
+  - name: Sponsorisation
+    description: Gestion des sponsorisations
+  - name: Stripe
+    description: Paiements et abonnements
+  - name: Dashboard
+    description: Tableau de bord entreprise
+  - name: Utilisateurs
+    description: Gestion des utilisateurs
+
+paths:
+  # ==================== AUTHENTIFICATION ====================
+  /auth-token/:
+    post:
+      tags:
+        - Authentification
+      summary: Obtenir un token d'authentification
+      description: Authentification par email et mot de passe. Retourne un token à utiliser dans les requêtes suivantes.
+      operationId: obtainAuthToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  format: email
+                  example: client@example.com
+                password:
+                  type: string
+                  format: password
+                  example: SecurePassword123!
+      responses:
+        '200':
+          description: Token généré avec succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    example: 9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b
+              example:
+                token: "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"
+        '400':
+          description: Identifiants invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Impossible de se connecter avec les identifiants fournis."
+
+  # ==================== RECHERCHE ====================
+  /search/:
+    get:
+      tags:
+        - Recherche
+      summary: Moteur de recherche principal
+      description: |
+        Recherche d'entreprises par catégorie, sous-catégorie et ville.
+        
+        **Résultats retournés :**
+        - 5 entreprises sponsorisées en rotation (max)
+        - 15 entreprises organiques triées par score
+        - Total : 20 résultats par page
+        
+        **Rotation des sponsors :**
+        Les sponsors sont sélectionnés selon le nombre d'impressions (rotation équitable).
+      operationId: searchEnterprises
+      parameters:
+        - name: categorie
+          in: query
+          description: Slug de la catégorie
+          schema:
+            type: string
+            example: services-informatique
+        - name: sous_categorie
+          in: query
+          description: Slug de la sous-catégorie
+          schema:
+            type: string
+            example: developpement-web
+        - name: ville
+          in: query
+          description: Slug de la ville
+          schema:
+            type: string
+            example: paris
+        - name: page
+          in: query
+          description: Numéro de page
+          schema:
+            type: integer
+            default: 1
+            example: 1
+        - name: page_size
+          in: query
+          description: Taille de la page (max 20)
+          schema:
+            type: integer
+            default: 20
+            maximum: 20
+            example: 20
+      responses:
+        '200':
+          description: Résultats de recherche
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+        '400':
+          description: Paramètres invalides
+
+  # ==================== ENTREPRISES ====================
+  /entreprises/:
+    get:
+      tags:
+        - Entreprises
+      summary: Liste des entreprises
+      description: Récupère la liste paginée des entreprises avec filtres et recherche
+      operationId: listEntreprises
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: is_active
+          in: query
+          description: Filtrer par statut actif
+          schema:
+            type: boolean
+        - name: code_postal
+          in: query
+          description: Filtrer par code postal
+          schema:
+            type: string
+            example: "75001"
+        - name: naf_code
+          in: query
+          description: Filtrer par code NAF
+          schema:
+            type: string
+            example: "62.01Z"
+        - name: search
+          in: query
+          description: Recherche textuelle (nom, SIREN, ville, etc.)
+          schema:
+            type: string
+            example: "SARL Test"
+      responses:
+        '200':
+          description: Liste des entreprises
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntrepriseListResponse'
+    post:
+      tags:
+        - Entreprises
+      summary: Créer une entreprise
+      description: Crée une nouvelle entreprise (authentification requise)
+      operationId: createEntreprise
+      security:
+        - TokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntrepriseCreate'
+      responses:
+        '201':
+          description: Entreprise créée
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntrepriseDetail'
+        '400':
+          description: Données invalides
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /entreprises/{id}/:
+    get:
+      tags:
+        - Entreprises
+      summary: Détails d'une entreprise
+      description: Récupère les détails complets d'une entreprise
+      operationId: getEntreprise
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID de l'entreprise
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détails de l'entreprise
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntrepriseDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    put:
+      tags:
+        - Entreprises
+      summary: Mettre à jour une entreprise (complet)
+      operationId: updateEntreprise
+      security:
+        - TokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntrepriseCreate'
+      responses:
+        '200':
+          description: Entreprise mise à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntrepriseDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    patch:
+      tags:
+        - Entreprises
+      summary: Mettre à jour une entreprise (partiel)
+      operationId: partialUpdateEntreprise
+      security:
+        - TokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntrepriseCreate'
+      responses:
+        '200':
+          description: Entreprise mise à jour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntrepriseDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    delete:
+      tags:
+        - Entreprises
+      summary: Supprimer une entreprise
+      operationId: deleteEntreprise
+      security:
+        - TokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Entreprise supprimée
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /entreprises/{id}/upload_avis/:
+    post:
+      tags:
+        - Entreprises
+      summary: Upload d'avis de remplacement
+      description: |
+        Permet à une entreprise de fournir un avis de remplacement.
+        L'avis sera traité par l'IA pour génération du contenu décrypté.
+      operationId: uploadAvis
+      security:
+        - TokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - texte_avis
+              properties:
+                texte_avis:
+                  type: string
+                  minLength: 50
+                  description: Texte de l'avis (minimum 50 caractères)
+                  example: "Notre entreprise offre des services de qualité depuis 2010. Nos clients apprécient notre réactivité et notre expertise technique. Nous intervenons rapidement et efficacement."
+      responses:
+        '200':
+          description: Avis uploadé et traité
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  avis_id:
+                    type: string
+                    format: uuid
+                  texte_decrypte:
+                    type: string
+                  status:
+                    type: string
+              example:
+                message: "Avis uploadé et traité avec succès"
+                avis_id: "550e8400-e29b-41d4-a716-446655440000"
+                texte_decrypte: "Entreprise reconnue pour son expertise..."
+                status: "success"
+        '400':
+          description: Texte trop court ou invalide
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: ProLocalisation non trouvée
+
+  # ==================== PRO-LOCALISATIONS ====================
+  /pro-localisations/:
+    get:
+      tags:
+        - ProLocalisations
+      summary: Liste des ProLocalisations
+      description: Triplet Entreprise × Sous-catégorie × Ville
+      operationId: listProLocalisations
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: entreprise
+          in: query
+          description: Filtrer par entreprise (UUID)
+          schema:
+            type: string
+            format: uuid
+        - name: sous_categorie
+          in: query
+          description: Filtrer par sous-catégorie (UUID)
+          schema:
+            type: string
+            format: uuid
+        - name: ville
+          in: query
+          description: Filtrer par ville (UUID)
+          schema:
+            type: string
+            format: uuid
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+        - name: is_verified
+          in: query
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          description: Recherche textuelle
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Liste des ProLocalisations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProLocalisationListResponse'
+
+  /pro-localisations/{id}/:
+    get:
+      tags:
+        - ProLocalisations
+      summary: Détails d'une ProLocalisation
+      operationId: getProLocalisation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détails de la ProLocalisation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProLocalisationDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== AVIS DÉCRYPTÉS ====================
+  /avis-decryptes/:
+    get:
+      tags:
+        - Avis
+      summary: Liste des avis décryptés
+      operationId: listAvisDecryptes
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: entreprise
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: pro_localisation
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: source
+          in: query
+          description: Source de l'avis
+          schema:
+            type: string
+            enum: [google, trustpilot, facebook, yelp]
+        - name: needs_regeneration
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Liste des avis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvisDecrypteListResponse'
+
+  /avis-decryptes/{id}/:
+    get:
+      tags:
+        - Avis
+      summary: Détails d'un avis décrypté
+      operationId: getAvisDecrypte
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détails de l'avis
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvisDecrypte'
+
+  # ==================== CATÉGORIES ====================
+  /categories/:
+    get:
+      tags:
+        - Catégories
+      summary: Liste des catégories
+      operationId: listCategories
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: Liste des catégories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategorieListResponse'
+
+  /categories/{id}/:
+    get:
+      tags:
+        - Catégories
+      summary: Détails d'une catégorie
+      description: Inclut les sous-catégories associées
+      operationId: getCategorie
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détails de la catégorie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategorieDetail'
+
+  # ==================== SOUS-CATÉGORIES ====================
+  /sous-categories/:
+    get:
+      tags:
+        - Sous-catégories
+      summary: Liste des sous-catégories
+      operationId: listSousCategories
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: categorie
+          in: query
+          description: Filtrer par catégorie (UUID)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Liste des sous-catégories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SousCategorieListResponse'
+
+  # ==================== VILLES ====================
+  /villes/:
+    get:
+      tags:
+        - Villes
+      summary: Liste des villes
+      operationId: listVilles
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: search
+          in: query
+          description: Recherche par nom ou code postal
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Liste des villes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VilleListResponse'
+
+  # ==================== SPONSORISATION ====================
+  /sponsorisations/:
+    get:
+      tags:
+        - Sponsorisation
+      summary: Liste des sponsorisations
+      operationId: listSponsorisations
+      security:
+        - TokenAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+        - name: statut_paiement
+          in: query
+          schema:
+            type: string
+            enum: [active, past_due, canceled]
+      responses:
+        '200':
+          description: Liste des sponsorisations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SponsorisationListResponse'
+
+  # ==================== STRIPE ====================
+  /stripe/create-checkout/:
+    post:
+      tags:
+        - Stripe
+      summary: Créer session Stripe Checkout
+      description: |
+        Crée une session de paiement Stripe pour souscrire à une sponsorisation.
+        
+        L'entreprise sera redirigée vers Stripe pour effectuer le paiement.
+        Après paiement réussi, le webhook activera automatiquement la sponsorisation.
+        
+        **Note**: Une clé d'idempotence est automatiquement générée pour éviter les créations de sessions en double.
+      operationId: createStripeCheckout
+      security:
+        - TokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - pro_localisation_id
+                - success_url
+                - cancel_url
+              properties:
+                pro_localisation_id:
+                  type: string
+                  format: uuid
+                  description: ID de la ProLocalisation à sponsoriser
+                duration_months:
+                  type: integer
+                  default: 1
+                  minimum: 1
+                  maximum: 12
+                  description: Durée de l'abonnement en mois
+                success_url:
+                  type: string
+                  format: uri
+                  description: URL de redirection après paiement réussi
+                  example: "https://foxreviews.com/success?session_id={CHECKOUT_SESSION_ID}"
+                cancel_url:
+                  type: string
+                  format: uri
+                  description: URL de redirection si paiement annulé
+                  example: "https://foxreviews.com/cancel"
+      responses:
+        '200':
+          description: Session créée avec succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkout_url:
+                    type: string
+                    format: uri
+                    description: URL de checkout Stripe
+                  session_id:
+                    type: string
+                    description: ID de la session Stripe
+              example:
+                checkout_url: "https://checkout.stripe.com/c/pay/cs_test_..."
+                session_id: "cs_test_a1b2c3d4e5f6g7h8i9j0"
+        '400':
+          description: Paramètres manquants ou invalides
+        '403':
+          description: Limite de 5 sponsors atteinte pour ce triplet
+        '404':
+          description: ProLocalisation introuvable
+
+  /stripe/webhook/:
+    post:
+      tags:
+        - Stripe
+      summary: Webhook Stripe
+      description: |
+        Endpoint appelé par Stripe lors d'événements liés aux paiements.
+        
+        **Événements gérés :**
+        - `checkout.session.completed` : Active la sponsorisation
+        - `invoice.payment_succeeded` : Maintient l'abonnement actif
+        - `invoice.payment_failed` : Marque l'abonnement en retard
+        - `customer.subscription.deleted` : Désactive la sponsorisation
+      operationId: stripeWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Événement Stripe (format natif)
+      responses:
+        '200':
+          description: Webhook traité avec succès
+        '400':
+          description: Signature invalide
+
+  # ==================== DASHBOARD ====================
+  /dashboard/:
+    get:
+      tags:
+        - Dashboard
+      summary: Tableau de bord entreprise
+      description: |
+        Récupère les statistiques et informations pour le tableau de bord d'une entreprise.
+        
+        **Inclut :**
+        - Données entreprise
+        - Statut sponsorisation
+        - Statistiques (impressions, clics, position)
+        - Avis récents
+      operationId: getDashboard
+      security:
+        - TokenAuth: []
+      parameters:
+        - name: entreprise_id
+          in: query
+          required: true
+          description: UUID de l'entreprise
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Données du dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Entreprise non trouvée
+
+  # ==================== USERS ====================
+  /users/:
+    get:
+      tags:
+        - Utilisateurs
+      summary: Liste des utilisateurs
+      operationId: listUsers
+      security:
+        - TokenAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          description: Liste des utilisateurs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+
+  /users/{id}/:
+    get:
+      tags:
+        - Utilisateurs
+      summary: Détails d'un utilisateur
+      operationId: getUser
+      security:
+        - TokenAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Détails de l'utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+# ==================== COMPONENTS ====================
+components:
+  securitySchemes:
+    TokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 'Token d''authentification au format: "Token <votre_token>"'
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: Numéro de page
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+    
+    PageSizeParam:
+      name: page_size
+      in: query
+      description: Nombre d'éléments par page
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+
+  responses:
+    Unauthorized:
+      description: Non authentifié
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            detail: "Les informations d'authentification n'ont pas été fournies."
+    
+    NotFound:
+      description: Ressource non trouvée
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            detail: "Non trouvé."
+
+  schemas:
+    # ==================== COMMON ====================
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
+        error:
+          type: string
+    
+    Pagination:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Nombre total d'éléments
+        next:
+          type: string
+          format: uri
+          nullable: true
+          description: URL de la page suivante
+        previous:
+          type: string
+          format: uri
+          nullable: true
+          description: URL de la page précédente
+
+    # ==================== ENTREPRISE ====================
+    EntrepriseList:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        siren:
+          type: string
+          pattern: '^\d{9}$'
+          example: "123456789"
+        siret:
+          type: string
+          pattern: '^\d{14}$'
+          example: "12345678900001"
+        nom:
+          type: string
+          example: "SARL Test"
+        nom_commercial:
+          type: string
+          example: "Test Company"
+        ville_nom:
+          type: string
+          example: "Paris"
+        code_postal:
+          type: string
+          example: "75001"
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    
+    EntrepriseDetail:
+      allOf:
+        - $ref: '#/components/schemas/EntrepriseList'
+        - type: object
+          properties:
+            adresse:
+              type: string
+              example: "123 Rue de la Paix"
+            naf_code:
+              type: string
+              example: "62.01Z"
+            naf_libelle:
+              type: string
+              example: "Programmation informatique"
+            telephone:
+              type: string
+              example: "+33123456789"
+            email_contact:
+              type: string
+              format: email
+              example: "contact@example.com"
+            site_web:
+              type: string
+              format: uri
+              example: "https://example.com"
+            nb_pro_localisations:
+              type: integer
+              description: Nombre de ProLocalisations
+            updated_at:
+              type: string
+              format: date-time
+    
+    EntrepriseCreate:
+      type: object
+      required:
+        - siren
+        - nom
+        - adresse
+        - code_postal
+        - ville_nom
+      properties:
+        siren:
+          type: string
+          pattern: '^\d{9}$'
+        siret:
+          type: string
+          pattern: '^\d{14}$'
+        nom:
+          type: string
+        nom_commercial:
+          type: string
+        adresse:
+          type: string
+        code_postal:
+          type: string
+        ville_nom:
+          type: string
+        naf_code:
+          type: string
+        naf_libelle:
+          type: string
+        telephone:
+          type: string
+        email_contact:
+          type: string
+          format: email
+        site_web:
+          type: string
+          format: uri
+        is_active:
+          type: boolean
+          default: true
+    
+    EntrepriseListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/EntrepriseList'
+
+    # ==================== PRO-LOCALISATION ====================
+    ProLocalisationList:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entreprise:
+          type: string
+          format: uuid
+        entreprise_nom:
+          type: string
+        sous_categorie:
+          type: string
+          format: uuid
+        sous_categorie_nom:
+          type: string
+        ville:
+          type: string
+          format: uuid
+        ville_nom:
+          type: string
+        note_moyenne:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 5
+        nb_avis:
+          type: integer
+        score_global:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+        is_verified:
+          type: boolean
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    
+    ProLocalisationDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProLocalisationList'
+        - type: object
+          properties:
+            zone_description:
+              type: string
+            texte_long_entreprise:
+              type: string
+            meta_description:
+              type: string
+            date_derniere_generation_ia:
+              type: string
+              format: date-time
+              nullable: true
+    
+    ProLocalisationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProLocalisationList'
+
+    # ==================== AVIS ====================
+    AvisDecrypte:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entreprise:
+          type: string
+          format: uuid
+        entreprise_nom:
+          type: string
+        pro_localisation:
+          type: string
+          format: uuid
+        texte_brut:
+          type: string
+          description: Texte source de l'avis
+        texte_decrypte:
+          type: string
+          description: Texte décrypté par l'IA
+        source:
+          type: string
+          enum: [google, trustpilot, facebook, yelp, custom]
+        date_generation:
+          type: string
+          format: date-time
+        date_expiration:
+          type: string
+          format: date-time
+          nullable: true
+        needs_regeneration:
+          type: boolean
+        confidence_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    
+    AvisDecrypteListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/AvisDecrypte'
+
+    # ==================== CATÉGORIE ====================
+    Categorie:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nom:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        ordre:
+          type: integer
+        nb_sous_categories:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    
+    CategorieDetail:
+      allOf:
+        - $ref: '#/components/schemas/Categorie'
+        - type: object
+          properties:
+            sous_categories:
+              type: array
+              items:
+                $ref: '#/components/schemas/SousCategorie'
+    
+    CategorieListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/Categorie'
+
+    # ==================== SOUS-CATÉGORIE ====================
+    SousCategorie:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        categorie:
+          type: string
+          format: uuid
+        nom:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        ordre:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    
+    SousCategorieListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/SousCategorie'
+
+    # ==================== VILLE ====================
+    Ville:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nom:
+          type: string
+        slug:
+          type: string
+        code_postal:
+          type: string
+        code_insee:
+          type: string
+        departement:
+          type: string
+        region:
+          type: string
+        latitude:
+          type: number
+          format: float
+          nullable: true
+        longitude:
+          type: number
+          format: float
+          nullable: true
+        population:
+          type: integer
+          nullable: true
+    
+    VilleListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/Ville'
+
+    # ==================== SPONSORISATION ====================
+    Sponsorisation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        pro_localisation:
+          type: string
+          format: uuid
+        date_debut:
+          type: string
+          format: date-time
+        date_fin:
+          type: string
+          format: date-time
+        is_active:
+          type: boolean
+        nb_impressions:
+          type: integer
+        nb_clicks:
+          type: integer
+        subscription_id:
+          type: string
+          nullable: true
+        montant_mensuel:
+          type: number
+          format: decimal
+        statut_paiement:
+          type: string
+          enum: [active, past_due, canceled]
+        created_at:
+          type: string
+          format: date-time
+    
+    SponsorisationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/Sponsorisation'
+
+    # ==================== SEARCH ====================
+    SearchResults:
+      type: object
+      properties:
+        sponsored:
+          type: array
+          description: Entreprises sponsorisées (max 5)
+          items:
+            $ref: '#/components/schemas/ProLocalisationList'
+        organic:
+          type: array
+          description: Résultats organiques (max 15)
+          items:
+            $ref: '#/components/schemas/ProLocalisationList'
+        total:
+          type: integer
+          description: Nombre total de résultats
+        page:
+          type: integer
+        page_size:
+          type: integer
+        has_next:
+          type: boolean
+        filters:
+          type: object
+          properties:
+            categorie:
+              type: string
+              nullable: true
+            sous_categorie:
+              type: string
+              nullable: true
+            ville:
+              type: string
+              nullable: true
+      example:
+        sponsored:
+          - id: "550e8400-e29b-41d4-a716-446655440000"
+            entreprise_nom: "Tech Solutions Pro"
+            sous_categorie_nom: "Développement Web"
+            ville_nom: "Paris"
+            note_moyenne: 4.8
+            nb_avis: 127
+            score_global: 95.5
+        organic:
+          - id: "660e8400-e29b-41d4-a716-446655440001"
+            entreprise_nom: "Web Agency"
+            sous_categorie_nom: "Développement Web"
+            ville_nom: "Paris"
+            note_moyenne: 4.5
+            nb_avis: 89
+            score_global: 87.3
+        total: 234
+        page: 1
+        page_size: 20
+        has_next: true
+        filters:
+          categorie: "services-informatique"
+          sous_categorie: "developpement-web"
+          ville: "paris"
+
+    # ==================== DASHBOARD ====================
+    Dashboard:
+      type: object
+      properties:
+        entreprise:
+          $ref: '#/components/schemas/EntrepriseDetail'
+        sponsorisation:
+          type: object
+          nullable: true
+          properties:
+            is_active:
+              type: boolean
+            date_debut:
+              type: string
+              format: date-time
+            date_fin:
+              type: string
+              format: date-time
+            montant_mensuel:
+              type: number
+            statut_paiement:
+              type: string
+        statistiques:
+          type: object
+          properties:
+            impressions_totales:
+              type: integer
+            clicks_totaux:
+              type: integer
+            taux_clic:
+              type: number
+              format: float
+            rotation_position:
+              type: integer
+              description: Position dans la rotation (1-5)
+        avis_recents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvisDecrypte'
+
+    # ==================== USER ====================
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        is_active:
+          type: boolean

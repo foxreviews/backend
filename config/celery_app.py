@@ -1,8 +1,8 @@
 import os
 
 from celery import Celery
-from celery.signals import setup_logging
 from celery.schedules import crontab
+from celery.signals import setup_logging
 
 # set the default Django settings module for the 'celery' program.
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.local")
@@ -49,7 +49,9 @@ app.conf.beat_schedule = {
     # Génération trimestrielle des contenus catégories
     "generate-category-contents": {
         "task": "generate_category_contents",
-        "schedule": crontab(month_of_year="1,4,7,10", day_of_month=15, hour=4, minute=0),
+        "schedule": crontab(
+            month_of_year="1,4,7,10", day_of_month=15, hour=4, minute=0,
+        ),
     },
     # Génération semestrielle des contenus villes
     "generate-ville-contents": {

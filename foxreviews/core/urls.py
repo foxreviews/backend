@@ -1,9 +1,10 @@
 from django.urls import path
 
-from .views import ping
-from .api.search import search_enterprises
 from .api.entreprise_dashboard import entreprise_dashboard
-from .api.stripe_integration import create_checkout_session, stripe_webhook
+from .api.search import search_enterprises
+from .api.stripe_integration import create_checkout_session
+from .api.stripe_integration import stripe_webhook
+from .views import ping
 
 urlpatterns = [
     path("ping/", ping, name="ping"),

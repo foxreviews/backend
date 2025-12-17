@@ -1,26 +1,24 @@
 """
 Modèles pour l'app SubCategory.
 """
+
 import uuid
+
 from django.db import models
-from django.utils.translation import gettext_lazy as _
 from django.utils.text import slugify
+from django.utils.translation import gettext_lazy as _
 
-
-class BaseModel(models.Model):
-    """Modèle de base avec UUID et timestamps."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
+from foxreviews.core.models import BaseModel
 
 
 class SousCategorie(BaseModel):
     """Sous-catégorie / Métier (ex: Plombier, Électricien)."""
 
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
     categorie = models.ForeignKey(
         "category.Categorie",
         on_delete=models.CASCADE,

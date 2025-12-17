@@ -9,4 +9,4 @@ Note: Les modèles métier ont maintenant leurs propres fichiers admin dans leur
 - foxreviews.reviews.admin (AvisDecrypte)
 - foxreviews.sponsorisation.admin (Sponsorisation)
 """
-from django.contrib import admin
+

@@ -2,7 +2,9 @@
 Management command: Désactiver les sponsorisations expirées.
 Usage: python manage.py deactivate_expired_sponsorships
 """
+
 from django.core.management.base import BaseCommand
+
 from foxreviews.core.services import SponsorshipService
 
 
@@ -16,7 +18,7 @@ class Command(BaseCommand):
 
         if count > 0:
             self.stdout.write(
-                self.style.SUCCESS(f"✓ {count} sponsorisation(s) désactivée(s)")
+                self.style.SUCCESS(f"✓ {count} sponsorisation(s) désactivée(s)"),
             )
         else:
             self.stdout.write("Aucune sponsorisation expirée trouvée.")

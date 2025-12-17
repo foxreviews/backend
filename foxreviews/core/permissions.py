@@ -5,18 +5,19 @@ Basées sur UserProfile.role (admin, manager, client).
 4 RÔLES UNIQUEMENT (simples, efficaces, propres):
 
 1️ ADMIN - Super user, accès total à toute l'application
-2️ MANAGER - Admin limité, gestion contenu sans config sensible  
+2️ MANAGER - Admin limité, gestion contenu sans config sensible
 3️ CLIENT - Entreprise inscrite, accès uniquement à son tableau de bord
 4️ VISITEUR - Pas de UserProfile (anonyme), accès public uniquement
 
 UserProfile est la source de vérité (PAS User.is_staff).
 """
+
 from rest_framework import permissions
 
 
 class IsAuthenticated(permissions.BasePermission):
     """Utilisateur authentifié avec UserProfile valide.
-    
+
     Exclut les VISITEURS (anonymes sans UserProfile).
     """
 
@@ -30,7 +31,7 @@ class IsAuthenticated(permissions.BasePermission):
 
 class IsAdmin(permissions.BasePermission):
     """Seuls les ADMIN peuvent accéder.
-    
+
     ADMIN a accès total à toute l'application:
     - Gérer les utilisateurs
     - Gérer les entreprises
@@ -52,14 +53,14 @@ class IsAdmin(permissions.BasePermission):
 
 class IsAdminOrManager(permissions.BasePermission):
     """ADMIN ou MANAGER peuvent accéder.
-    
+
     MANAGER (admin limité) peut:
     - Gérer les entreprises (édition, validation, désactivation)
     - Gérer les avis décryptés
     - Gérer les sponsorisations (activation/désactivation uniquement)
     - Voir les stats (pas modifier réglages globaux)
     - Lancer régénération IA manuelle
-    
+
     MANAGER ne peut PAS:
     - Gérer les rôles
     - Modifier la configuration système
@@ -78,10 +79,10 @@ class IsAdminOrManager(permissions.BasePermission):
 class IsAdminOrReadOnly(permissions.BasePermission):
     """
     Lecture pour TOUS (même VISITEUR anonyme), écriture pour ADMIN uniquement.
-    
+
     - GET, HEAD, OPTIONS: accessible à tous (même VISITEUR anonyme)
     - POST, PUT, PATCH, DELETE: ADMIN uniquement
-    
+
     Utilisé pour:
     - Catégories (lecture publique, modification admin)
     - Sous-catégories (lecture publique, modification admin)
@@ -104,12 +105,12 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 class IsOwnerOrAdmin(permissions.BasePermission):
     """
     Propriétaire de l'objet (CLIENT) ou ADMIN.
-    
+
     - ADMIN: accès total
     - CLIENT: uniquement son entreprise (via UserProfile.entreprise)
     - MANAGER: lecture uniquement
     - VISITEUR: pas d'accès
-    
+
     CLIENT peut:
     - Voir son entreprise et son statut sponsorisé
     - Voir ses stats (clics, impressions, position rotation)
@@ -117,7 +118,7 @@ class IsOwnerOrAdmin(permissions.BasePermission):
     - Télécharger un avis de remplacement
     - Voir son statut de facturation et télécharger ses factures
     - Activer / résilier l'abonnement sponsorisé
-    
+
     CLIENT ne peut PAS:
     - Modifier l'architecture ou les catégories
     - Voir les autres entreprises
@@ -161,7 +162,7 @@ class IsOwnerOrAdmin(permissions.BasePermission):
 class CanManageSponsorship(permissions.BasePermission):
     """
     Gestion des sponsorisations selon les rôles.
-    
+
     - ADMIN: peut tout gérer (CRUD complet + forcer rotation)
     - MANAGER: peut activer/désactiver uniquement (read + activate/deactivate)
     - CLIENT: peut voir ses propres sponsorisations et les activer/résilier
@@ -186,9 +187,7 @@ class CanManageSponsorship(permissions.BasePermission):
             if request.method in permissions.SAFE_METHODS:
                 return True
             # Autoriser PATCH pour activate/deactivate uniquement
-            if request.method == "PATCH":
-                return True
-            return False
+            return request.method == "PATCH"
 
         # CLIENT doit avoir une entreprise pour créer sponsorisation
         if profile.role == "client" and request.method == "POST":
@@ -213,9 +212,7 @@ class CanManageSponsorship(permissions.BasePermission):
             if request.method in permissions.SAFE_METHODS:
                 return True
             # Uniquement PATCH pour changements de statut
-            if request.method == "PATCH":
-                return True
-            return False
+            return request.method == "PATCH"
 
         # CLIENT ne peut gérer que les sponsorisations de son entreprise
         if profile.role == "client" and profile.entreprise:
@@ -227,10 +224,10 @@ class CanManageSponsorship(permissions.BasePermission):
 class IsAuthenticatedOrReadOnly(permissions.BasePermission):
     """
     Lecture pour TOUS (même VISITEUR anonyme), écriture pour authentifiés avec UserProfile.
-    
+
     - GET, HEAD, OPTIONS: accessible à tous (même VISITEUR anonyme)
     - POST, PUT, PATCH, DELETE: Utilisateurs authentifiés avec UserProfile
-    
+
     Utilisé pour:
     - Entreprises (lecture publique, modification authentifiée)
     - Avis (lecture publique, modification authentifiée)
@@ -251,14 +248,14 @@ class IsAuthenticatedOrReadOnly(permissions.BasePermission):
 class IsPublicReadOnly(permissions.BasePermission):
     """
     Lecture seule pour TOUS (même VISITEUR anonyme).
-    
+
     VISITEUR (anonyme, pas de UserProfile) peut:
     - Utiliser le moteur de recherche
     - Consulter les pages pros
     - Voir les avis décryptés
     - Voir les catégories et villes
     - Contacter un pro directement
-    
+
     Aucune modification n'est autorisée.
     Utilisé pour les endpoints publics (search, entreprises, avis).
     """

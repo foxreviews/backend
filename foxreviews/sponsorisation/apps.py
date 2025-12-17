@@ -9,4 +9,3 @@ class SponsorisationConfig(AppConfig):
 
     def ready(self):
         """Import signals if any."""
-        pass

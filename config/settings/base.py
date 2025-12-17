@@ -20,18 +20,16 @@ else:
     # DJANGO_SETTINGS_MODULE détermine l'environnement (local ou production)
     # En Docker, ces fichiers sont chargés par docker-compose
     import os
+
     settings_module = os.environ.get("DJANGO_SETTINGS_MODULE", "config.settings.local")
-    
-    if "production" in settings_module:
-        env_type = ".production"
-    else:
-        env_type = ".local"
-    
+
+    env_type = ".production" if "production" in settings_module else ".local"
+
     envs_dir = BASE_DIR / ".envs" / env_type
     if envs_dir.exists():
         django_env = envs_dir / ".django"
         postgres_env = envs_dir / ".postgres"
-        
+
         if django_env.exists():
             env.read_env(str(django_env))
         if postgres_env.exists():
@@ -77,7 +75,7 @@ DATABASES = {
         "HOST": env("POSTGRES_HOST", default="localhost"),
         "PORT": env("POSTGRES_PORT", default="5432"),
         "ATOMIC_REQUESTS": True,
-    }
+    },
 }
 # https://docs.djangoproject.com/en/stable/ref/settings/#std:setting-DEFAULT_AUTO_FIELD
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -411,6 +409,10 @@ FASTAPI_TIMEOUT = env.int("FASTAPI_TIMEOUT", default=60)
 STRIPE_SECRET_KEY = env.str("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env.str("STRIPE_WEBHOOK_SECRET", default="")
 STRIPE_SPONSORSHIP_PRICE_ID = env.str("STRIPE_SPONSORSHIP_PRICE_ID", default="")
+
+# INSEE Sirene API
+INSEE_API_KEY = env.str("INSEE_API_KEY", default="")
+INSEE_TIMEOUT = env.int("INSEE_TIMEOUT", default=30)
 
 # Legacy AI API (deprecated - use FASTAPI instead)
 AI_API_BASE_URL = env.str("AI_API_BASE_URL", default="http://localhost:8080/api/v1")

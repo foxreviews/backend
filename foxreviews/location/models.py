@@ -1,27 +1,26 @@
 """
 Modèles pour l'app Location (Ville).
 """
+
 import uuid
+
+from django.core.validators import MaxValueValidator
+from django.core.validators import MinValueValidator
 from django.db import models
-from django.utils.translation import gettext_lazy as _
 from django.utils.text import slugify
-from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils.translation import gettext_lazy as _
 
-
-class BaseModel(models.Model):
-    """Modèle de base avec UUID et timestamps."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
+from foxreviews.core.models import BaseModel
 
 
 class Ville(BaseModel):
     """Ville avec géolocalisation."""
 
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
     nom = models.CharField(max_length=100, db_index=True)
     slug = models.SlugField(max_length=120, unique=True, db_index=True)
     code_postal_principal = models.CharField(max_length=5, db_index=True)

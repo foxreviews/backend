@@ -1,27 +1,21 @@
-"""
-Modèles pour l'app Enterprise.
-"""
 import uuid
+
+from django.core.validators import MaxValueValidator
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-from django.core.validators import MinValueValidator, MaxValueValidator
 
-
-class BaseModel(models.Model):
-    """Modèle de base avec UUID et timestamps."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
+from foxreviews.core.models import BaseModel
 
 
 class Entreprise(BaseModel):
     """Entreprise (données INSEE)."""
 
-    # Données INSEE
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
     siren = models.CharField(
         max_length=9,
         unique=True,
@@ -87,7 +81,6 @@ class Entreprise(BaseModel):
 class ProLocalisation(BaseModel):
     """
     ProLocalisation = Entreprise × SousCategorie × Ville.
-    
     Page finale du site (ex: "Plombier Paris 75001").
     """
 

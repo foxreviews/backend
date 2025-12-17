@@ -1,29 +1,33 @@
 """
 ViewSets pour l'app Enterprise.
 """
-from rest_framework import filters, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema, OpenApiResponse
-from foxreviews.core.viewsets import CRUDViewSet
+from drf_spectacular.utils import OpenApiResponse
+from drf_spectacular.utils import extend_schema
+from rest_framework import filters
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from foxreviews.core.ai_service import AIService
+from foxreviews.core.ai_service import AIServiceError
 from foxreviews.core.pagination import ResultsPageNumberPagination
 from foxreviews.core.permissions import IsAuthenticatedOrReadOnly
-from foxreviews.core.ai_service import AIService, AIServiceError
-from foxreviews.enterprise.models import Entreprise, ProLocalisation
-from foxreviews.enterprise.api.serializers import (
-    EntrepriseListSerializer,
-    EntrepriseDetailSerializer,
-    ProLocalisationListSerializer,
-    ProLocalisationDetailSerializer,
-)
+from foxreviews.core.viewsets import CRUDViewSet
+from foxreviews.enterprise.api.serializers import EntrepriseDetailSerializer
+from foxreviews.enterprise.api.serializers import EntrepriseListSerializer
+from foxreviews.enterprise.api.serializers import ProLocalisationDetailSerializer
+from foxreviews.enterprise.api.serializers import ProLocalisationListSerializer
+from foxreviews.enterprise.models import Entreprise
+from foxreviews.enterprise.models import ProLocalisation
 
 
 class EntrepriseViewSet(CRUDViewSet):
     """
     ViewSet pour Entreprise.
-    
+
     Permissions: Lecture publique, modification authentifiée.
     """
 
@@ -61,10 +65,13 @@ class EntrepriseViewSet(CRUDViewSet):
             "application/json": {
                 "type": "object",
                 "properties": {
-                    "texte_avis": {"type": "string", "description": "Texte de l'avis fourni par le client"}
+                    "texte_avis": {
+                        "type": "string",
+                        "description": "Texte de l'avis fourni par le client",
+                    },
                 },
-                "required": ["texte_avis"]
-            }
+                "required": ["texte_avis"],
+            },
         },
         responses={
             200: OpenApiResponse(description="Avis uploadé et régénération lancée"),
@@ -72,7 +79,7 @@ class EntrepriseViewSet(CRUDViewSet):
             403: OpenApiResponse(description="Non autorisé"),
             404: OpenApiResponse(description="ProLocalisation non trouvée"),
         },
-        tags=["Entreprises"]
+        tags=["Entreprises"],
     )
     @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
     def upload_avis(self, request, pk=None):
@@ -86,19 +93,18 @@ class EntrepriseViewSet(CRUDViewSet):
         if not texte_avis or len(texte_avis.strip()) < 50:
             return Response(
                 {"error": "Le texte de l'avis doit contenir au moins 50 caractères"},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Récupérer la ProLocalisation principale
         pro_loc = ProLocalisation.objects.filter(
-            entreprise=entreprise,
-            is_active=True
+            entreprise=entreprise, is_active=True,
         ).first()
 
         if not pro_loc:
             return Response(
                 {"error": "Aucune localisation active pour cette entreprise"},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         # Appeler le service IA pour régénération avec texte client
@@ -114,29 +120,33 @@ class EntrepriseViewSet(CRUDViewSet):
             avis = ai_service.create_avis_from_result(pro_loc, result)
 
             if avis:
-                return Response({
-                    "message": "Avis uploadé et traité avec succès",
-                    "avis_id": str(avis.id),
-                    "texte_decrypte": avis.texte_decrypte,
-                    "status": "success"
-                })
-            else:
-                return Response({
+                return Response(
+                    {
+                        "message": "Avis uploadé et traité avec succès",
+                        "avis_id": str(avis.id),
+                        "texte_decrypte": avis.texte_decrypte,
+                        "status": "success",
+                    },
+                )
+            return Response(
+                {
                     "message": "Avis uploadé mais aucun contenu généré",
-                    "status": "no_review_found"
-                }, status=status.HTTP_200_OK)
+                    "status": "no_review_found",
+                },
+                status=status.HTTP_200_OK,
+            )
 
         except AIServiceError as e:
             return Response(
-                {"error": f"Erreur lors du traitement IA: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": f"Erreur lors du traitement IA: {e!s}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
 class ProLocalisationViewSet(CRUDViewSet):
     """
     ViewSet pour ProLocalisation.
-    
+
     Permissions: Lecture publique, modification authentifiée.
     """
 

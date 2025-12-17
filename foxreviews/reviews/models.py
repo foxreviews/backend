@@ -1,26 +1,21 @@
-"""
-Modèles pour l'app Reviews (Avis Décryptés).
-"""
 import uuid
+
+from django.core.validators import MaxValueValidator
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-from django.core.validators import MinValueValidator, MaxValueValidator
 
-
-class BaseModel(models.Model):
-    """Modèle de base avec UUID et timestamps."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
+from foxreviews.core.models import BaseModel
 
 
 class AvisDecrypte(BaseModel):
     """Avis décrypté généré par IA."""
 
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
     entreprise = models.ForeignKey(
         "enterprise.Entreprise",
         on_delete=models.CASCADE,
@@ -74,4 +69,6 @@ class AvisDecrypte(BaseModel):
         ]
 
     def __str__(self):
-        return f"Avis {self.entreprise.nom} - {self.date_generation.strftime('%Y-%m-%d')}"
+        return (
+            f"Avis {self.entreprise.nom} - {self.date_generation.strftime('%Y-%m-%d')}"
+        )
