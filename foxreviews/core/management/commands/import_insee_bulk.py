@@ -151,12 +151,13 @@ class Command(BaseCommand):
                     options["query"],
                     options["naf"],
                     options["departement"],
+                    options["commune"],
                     options["csv_file"],
                 ],
             ):
                 msg = (
                     "Vous devez spécifier au moins une source de données: "
-                    "--query, --naf, --departement ou --csv-file"
+                    "--query, --naf, --departement, --commune ou --csv-file"
                 )
                 raise CommandError(
                     msg,
