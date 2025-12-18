@@ -226,10 +226,9 @@ class Command(BaseCommand):
             tranche = options["tranche_effectifs"]
             query_parts.append(f"trancheEffectifsEtablissement:{tranche}")
 
-        # État administratif (actif/fermé/tous)
-        etat = options.get("etat", "A")
+        etat = options.get("etat", "")
         if etat != "all":
-            query_parts.append(f"etatAdministratifEtablissement:{etat}")
+            query_parts.append(f"etatAdministratifEtablissement")
 
         # L'API INSEE utilise des virgules comme séparateur de critères
         return ",".join(query_parts)
@@ -417,25 +416,25 @@ class Command(BaseCommand):
         periode_actuelle = periodes[0] if periodes else {}
 
         # Données entreprise - gestion des personnes physiques et morales
-        denomination = unite_legale.get("denominationUniteLegale", "").strip()
+        denomination = (unite_legale.get("denominationUniteLegale") or "").strip()
 
         if denomination:
             nom = denomination
         else:
             # Personne physique : prénom + nom
-            prenom = unite_legale.get("prenomUsuelUniteLegale", "").strip()
-            nom_personne = unite_legale.get("nomUniteLegale", "").strip()
+            prenom = (unite_legale.get("prenomUsuelUniteLegale") or "").strip()
+            nom_personne = (unite_legale.get("nomUniteLegale") or "").strip()
             nom = f"{prenom} {nom_personne}".strip()
 
         if not nom:
             nom = "Entreprise sans dénomination"
 
         # Nom commercial depuis les périodes de l'établissement
-        nom_commercial = periode_actuelle.get(
-            "denominationUsuelleEtablissement", "",
+        nom_commercial = (
+            periode_actuelle.get("denominationUsuelleEtablissement") or ""
         ).strip()
         if not nom_commercial:
-            nom_commercial = periode_actuelle.get("enseigne1Etablissement", "").strip()
+            nom_commercial = (periode_actuelle.get("enseigne1Etablissement") or "").strip()
 
         # Adresse
         adresse_complete = self._build_adresse(adresse)
@@ -443,9 +442,9 @@ class Command(BaseCommand):
         ville_nom = adresse.get("libelleCommuneEtablissement", "")
 
         # NAF avec code et libellé depuis periodesEtablissement
-        naf_code = periode_actuelle.get("activitePrincipaleEtablissement", "").strip()
-        naf_libelle = periode_actuelle.get(
-            "activitePrincipaleLibelleEtablissement", "",
+        naf_code = (periode_actuelle.get("activitePrincipaleEtablissement") or "").strip()
+        naf_libelle = (
+            periode_actuelle.get("activitePrincipaleLibelleEtablissement") or ""
         ).strip()
 
         # Contact depuis l'unité légale
@@ -532,27 +531,27 @@ class Command(BaseCommand):
         parts = []
 
         # Numéro de voie
-        numero = adresse.get("numeroVoieEtablissement", "").strip()
+        numero = (adresse.get("numeroVoieEtablissement") or "").strip()
         if numero:
             parts.append(numero)
 
         # Indice de répétition (bis, ter, etc.)
-        indice = adresse.get("indiceRepetitionEtablissement", "").strip()
+        indice = (adresse.get("indiceRepetitionEtablissement") or "").strip()
         if indice:
             parts.append(indice)
 
         # Type de voie (RUE, AVENUE, BOULEVARD, etc.)
-        type_voie = adresse.get("typeVoieEtablissement", "").strip()
+        type_voie = (adresse.get("typeVoieEtablissement") or "").strip()
         if type_voie:
             parts.append(type_voie)
 
         # Libellé de la voie
-        libelle = adresse.get("libelleVoieEtablissement", "").strip()
+        libelle = (adresse.get("libelleVoieEtablissement") or "").strip()
         if libelle:
             parts.append(libelle)
 
         # Complément d'adresse (bâtiment, étage, etc.)
-        complement = adresse.get("complementAdresseEtablissement", "").strip()
+        complement = (adresse.get("complementAdresseEtablissement") or "").strip()
         if complement:
             parts.append(f"({complement})")
 
