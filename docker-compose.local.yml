@@ -3,14 +3,6 @@ volumes:
   foxreviews_local_postgres_data_backups: {}
   foxreviews_local_redis_data: {}
 
-networks:
-  default:
-    name: foxreviews_network
-    driver: bridge
-  foxreviews_shared:
-    external: true
-    name: foxreviews_shared
-
 services:
   django: &django
     build:
@@ -46,19 +38,24 @@ services:
       - foxreviews_local_postgres_data_backups:/backups
     env_file:
       - ./.envs/.local/.postgres
+    networks:
+      - default
 
   mailpit:
     image: docker.io/axllent/mailpit:latest
     container_name: foxreviews_local_mailpit
     ports:
       - "8028:8025"
+    networks:
+      - default
 
   redis:
     image: docker.io/redis:7.2
     container_name: foxreviews_local_redis
     volumes:
       - foxreviews_local_redis_data:/data
-
+    networks:
+      - default
   celeryworker:
     <<: *django
     image: foxreviews_local_celeryworker
@@ -69,6 +66,9 @@ services:
       - mailpit
     ports: []
     command: /start-celeryworker
+    networks:
+      - default
+      - foxreviews_shared
 
   celerybeat:
     <<: *django
@@ -80,6 +80,9 @@ services:
       - mailpit
     ports: []
     command: /start-celerybeat
+    networks:
+      - default
+      - foxreviews_shared
 
   flower:
     <<: *django
@@ -88,3 +91,12 @@ services:
     ports:
       - '5558:5555'
     command: /start-flower
+    networks:
+      - default
+      - foxreviews_shared
+
+networks:
+  default:
+    name: foxreviews_local_django
+  foxreviews_shared:
+    external: true
