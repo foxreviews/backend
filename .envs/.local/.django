@@ -16,10 +16,11 @@ CELERY_FLOWER_PASSWORD=debug
 
 # INSEE Sirene API
 # ------------------------------------------------------------------------------
-INSEE_API_KEY=cf8b21ae-f11c-49d5-8b21-aef11c59d5d4
+INSEE_API_KEY=c7e3cacf-7f9d-4ba5-a3ca-cf7f9d0ba50e
 INSEE_TIMEOUT=30
 
 # AI Service
 # ------------------------------------------------------------------------------
 AI_SERVICE_URL=http://agent_app_local:8000
 AI_SERVICE_TIMEOUT=60
+AI_SERVICE_API_KEY=2f5be65e-fc08-42f3-a51e-9751aaaaa88c

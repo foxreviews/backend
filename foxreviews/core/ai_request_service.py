@@ -26,6 +26,7 @@ class AIRequestService:
     def __init__(self):
         self.ai_url = getattr(settings, "AI_SERVICE_URL", "http://agent_app_local:8000")
         self.ai_timeout = getattr(settings, "AI_SERVICE_TIMEOUT", 60)
+        self.api_key = getattr(settings, "AI_SERVICE_API_KEY", "")
     
     def should_regenerate(self, prolocalisation: ProLocalisation) -> tuple[bool, str]:
         """
@@ -84,33 +85,38 @@ class AIRequestService:
         )
         sous_categorie_nom = self._normalize_string(prolocalisation.sous_categorie.nom)
         
-        # Construire le payload structuré
+        # Déterminer type selon qualité
+        # premium → avis_5_etoiles (ZERO FAUTE)
+        # standard → organic (naturel)
+        avis_type = "avis_5_etoiles" if quality == "premium" else "organic"
+        
+        # Construire le payload structuré selon API spec
         payload = {
             "request_id": request_id,
-            "type": "avis_5_etoiles",
-            "lang": "fr",
+            "type": avis_type,
             
             "entreprise": {
-                "id": str(prolocalisation.entreprise.id),
-                "nom": entreprise_nom[:100],  # Limite longueur
+                "id": prolocalisation.entreprise.id,
+                "nom": entreprise_nom[:100],
                 "siren": prolocalisation.entreprise.siren or "",
                 "ville": ville_nom[:50],
                 "code_postal": prolocalisation.entreprise.code_postal or "",
             },
             
             "classification": {
-                "categorie": categorie_nom[:50],
-                "sous_categorie": sous_categorie_nom[:100],
+                "categorie": categorie_nom,
+                "sous_categorie": sous_categorie_nom,
             },
             
             "contexte": {
-                "source_avis": "internet",
-                "periode": self._get_periode(),
-                "style": "journalistique",
-                "ton": "professionnel",
+                "quality": quality,
                 "longueur_max": 500 if quality == "premium" else 220,
-                "seo": True,
-                "quality": quality,  # premium ou standard
+                "style": "positif_realiste" if quality == "premium" else "simple_naturel",
+                "ton": "professionnel_chaleureux" if quality == "premium" else "spontane",
+                "validation_stricte": quality == "premium",
+                "allow_reformulation": quality != "premium",
+                "include_details": True,
+                "use_rag": True,
             },
         }
         
@@ -134,11 +140,16 @@ class AIRequestService:
             dict | None: Réponse de l'IA ou None si erreur
         """
         try:
+            headers = {"Content-Type": "application/json"}
+            
+            if self.api_key:
+                headers["X-Host-Header"] = self.api_key
+            
             response = requests.post(
-                f"{self.ai_url}/api/generate-review",
+                f"{self.ai_url}/api/v1/redaction/avis",
                 json=payload,
                 timeout=self.ai_timeout,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
             )
             response.raise_for_status()
             
@@ -186,11 +197,29 @@ class AIRequestService:
         if not response:
             return False, None
         
-        # Extraire texte généré
-        texte = response.get("texte_long", "")
+        # Vérifier status
+        if response.get("status") != "success":
+            logger.warning(
+                f"Génération échouée pour request_id={payload['request_id']}: "
+                f"{response.get('status')}"
+            )
+            return False, None
+        
+        # Extraire texte généré selon API spec (avis.texte)
+        avis_data = response.get("avis", {})
+        texte = avis_data.get("texte", "")
+        
         if not texte:
             logger.warning(f"Texte vide reçu pour request_id={payload['request_id']}")
             return False, None
+        
+        # Logger metadata pour debug
+        metadata = response.get("metadata", {})
+        logger.info(
+            f"Avis généré: quality_score={metadata.get('quality_score', 'N/A')}, "
+            f"source_mode={metadata.get('source_mode', 'N/A')}, "
+            f"validation_passed={avis_data.get('validation_passed', 'N/A')}"
+        )
         
         # Sauvegarder
         prolocalisation.texte_long_entreprise = texte
@@ -249,7 +278,16 @@ class AIRequestService:
     def check_health(self) -> bool:
         """Vérifie que le service IA est accessible."""
         try:
-            response = requests.get(f"{self.ai_url}/health", timeout=5)
+            headers = {}
+            
+            if self.api_key:
+                headers["X-Host-Header"] = self.api_key
+            
+            response = requests.get(
+                f"{self.ai_url}/health",
+                timeout=5,
+                headers=headers,
+            )
             return response.status_code == 200
         except:
             return False

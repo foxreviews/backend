@@ -7,9 +7,9 @@ networks:
   default:
     name: foxreviews_network
     driver: bridge
-  agent_network:
+  foxreviews_shared:
     external: true
-    name: agent_network
+    name: foxreviews_shared
 
 services:
   django: &django
@@ -33,7 +33,7 @@ services:
     command: /start
     networks:
       - default
-      - agent_network
+      - foxreviews_shared
 
   postgres:
     build:
