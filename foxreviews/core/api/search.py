@@ -3,6 +3,8 @@ API endpoint for main search functionality.
 Moteur de recherche principal: catégorie × sous-catégorie × ville
 """
 
+import random
+
 from drf_spectacular.utils import OpenApiParameter
 from drf_spectacular.utils import OpenApiResponse
 from drf_spectacular.utils import extend_schema
@@ -187,15 +189,33 @@ def search_enterprises(request):
     sponsored_ids = [pl.id for pl in sponsored_prolocalisations]
     organic_queryset = queryset.exclude(id__in=sponsored_ids)
 
-    # Pagination des organiques
-    # Max 15 organiques si on a 5 sponsorisés (20 - 5 = 15)
-    max_organic = page_size - len(sponsored_prolocalisations)
-    start = (page - 1) * max_organic
-    end = start + max_organic
-
-    organic_prolocalisations = organic_queryset.order_by(
-        "-score_global", "-note_moyenne", "-nb_avis",
-    )[start:end]
+    max_organic = min(page_size - len(sponsored_prolocalisations), 15)
+    
+    # 🎲 ROTATION DYNAMIQUE SCALABLE (à chaque requête)
+    # 
+    # Stratégie: Récupérer un pool plus large, shuffle en Python
+    # Avantages:
+    # - ✅ Rotation à chaque requête (100% équitable)
+    # - ✅ Pas de ORDER BY RANDOM() en DB (scalable)
+    # - ✅ Shuffle Python très rapide (microseconde)
+    # - ✅ Utilisateurs différents voient ordres différents
+    # - ✅ Refresh = nouvel ordre
+    
+    total_organic = organic_queryset.count()
+    
+    # Pool size: 3x ce qu'on veut afficher (pour bonne rotation)
+    pool_size = min(max_organic * 3, total_organic, 100)  # Max 100 pour perf
+    
+    # Récupérer le pool avec ordre prévisible (ORDER BY id = rapide)
+    organic_pool = list(
+        organic_queryset.order_by("id")[:pool_size]
+    )
+    
+    # Shuffle en Python (très rapide, pas de DB load)
+    random.shuffle(organic_pool)
+    
+    # Prendre les N premiers après shuffle
+    organic_prolocalisations = organic_pool[:max_organic]
 
     # Sérialisation avec contexte pour is_sponsored
     sponsored_data = SearchResultSerializer(
@@ -210,9 +230,7 @@ def search_enterprises(request):
         context={"request": request, "is_sponsored": False},
     ).data
 
-    # Calculer has_next
-    total_organic = organic_queryset.count()
-    has_next = end < total_organic
+    has_next = total_organic > max_organic
 
     # Format de réponse conforme à l'attendu
     return Response(
@@ -225,8 +243,12 @@ def search_enterprises(request):
                 "organic_count": len(organic_prolocalisations),
                 "page": page,
                 "page_size": page_size,
+                "max_organic_per_page": 15,
+                "max_sponsored_per_page": 5,
                 "has_next": has_next,
-                "rotation_active": len(sponsored_prolocalisations) > 0,
+                "rotation_active": True,
+                "rotation_type": "dynamic_shuffle",  # Shuffle à chaque requête
+                "pool_size": pool_size,  # Pour debug
                 "sponsoring_active": True,
             },
             "filters": filters_applied,

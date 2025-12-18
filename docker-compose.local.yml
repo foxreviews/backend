@@ -3,6 +3,14 @@ volumes:
   foxreviews_local_postgres_data_backups: {}
   foxreviews_local_redis_data: {}
 
+networks:
+  default:
+    name: foxreviews_network
+    driver: bridge
+  agent_network:
+    external: true
+    name: agent_network
+
 services:
   django: &django
     build:
@@ -23,6 +31,9 @@ services:
     ports:
       - '8003:8000'
     command: /start
+    networks:
+      - default
+      - agent_network
 
   postgres:
     build:

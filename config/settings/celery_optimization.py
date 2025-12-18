@@ -70,9 +70,19 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'foxreviews.core.tasks.deactivate_expired_sponsorships',
         'schedule': crontab(hour=1, minute=0),  # 1h du matin
     },
-    # Régénération IA mensuelle
-    'monthly-regenerate-reviews': {
-        'task': 'foxreviews.core.tasks.regenerate_monthly_reviews',
-        'schedule': crontab(day_of_month=1, hour=3, minute=0),
+    # 🎯 Régénération PREMIUM sponsorisés (1h du matin)
+    'nightly-regenerate-sponsored-premium': {
+        'task': 'core.regenerate_sponsored_premium',
+        'schedule': crontab(hour=1, minute=30),  # 1h30 du matin
+    },
+    # 🔄 Régénération nocturne avis IA (2h du matin)
+    'nightly-regenerate-ai-reviews': {
+        'task': 'core.regenerate_ai_reviews_nightly',
+        'schedule': crontab(hour=2, minute=30),  # 2h30 du matin
+    },
+    # 🔍 Génération avis manquants (4h du matin)
+    'nightly-generate-missing-reviews': {
+        'task': 'core.generate_missing_ai_reviews',
+        'schedule': crontab(hour=4, minute=0),  # 4h du matin
     },
 }

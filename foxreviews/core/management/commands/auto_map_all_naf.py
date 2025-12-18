@@ -7,6 +7,7 @@ Usage:
 """
 
 import logging
+import os
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -170,7 +171,11 @@ class Command(BaseCommand):
         # Étape 2 : Mapper tous les codes NAF non mappés
         new_mappings = self._auto_map_all_naf(dry_run)
 
-        # Étape 3 : Créer les ProLocalisations manquantes
+        # Étape 3 : Mettre à jour le fichier naf_mapping.py
+        if not dry_run and new_mappings:
+            self._update_naf_mapping_file(new_mappings)
+
+        # Étape 4 : Créer les ProLocalisations manquantes
         if create_proloc and not dry_run:
             self._create_missing_prolocalisations()
 
@@ -289,62 +294,166 @@ class Command(BaseCommand):
         
         return new_mappings
 
+    def _update_naf_mapping_file(self, new_mappings):
+        """Met à jour le fichier naf_mapping.py avec les nouveaux mappings."""
+        self.stdout.write("\n📝 Mise à jour du fichier naf_mapping.py...")
+        
+        # Chemin du fichier naf_mapping.py
+        naf_mapping_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+            'subcategory',
+            'naf_mapping.py'
+        )
+        
+        try:
+            # Lire le contenu actuel
+            with open(naf_mapping_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Trouver le dictionnaire NAF_TO_SUBCATEGORY
+            dict_start = content.find('NAF_TO_SUBCATEGORY = {')
+            if dict_start == -1:
+                self.stdout.write(self.style.ERROR("   ❌ Impossible de trouver NAF_TO_SUBCATEGORY"))
+                return
+            
+            # Trouver la fin du dictionnaire
+            dict_end = content.find('\n}', dict_start)
+            if dict_end == -1:
+                self.stdout.write(self.style.ERROR("   ❌ Impossible de trouver la fin du dictionnaire"))
+                return
+            
+            # Préparer les nouvelles lignes
+            new_lines = []
+            for naf_code, slug in sorted(new_mappings.items()):
+                new_lines.append(f'    "{naf_code}": "{slug}",  # Auto-généré')
+            
+            # Insérer les nouvelles lignes avant la fermeture du dictionnaire
+            new_content = (
+                content[:dict_end] + 
+                '\n    # Mappings auto-générés\n' + 
+                '\n'.join(new_lines) + 
+                content[dict_end:]
+            )
+            
+            # Écrire le nouveau contenu
+            with open(naf_mapping_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            self.stdout.write(f"   ✅ {len(new_mappings)} mappings ajoutés à naf_mapping.py")
+            
+        except Exception as e:
+            logger.error(f"Erreur mise à jour naf_mapping.py: {e}")
+            self.stdout.write(self.style.WARNING(f"   ⚠️  Erreur: {e}"))
+            self.stdout.write(self.style.WARNING("   💡 Les SousCategorie sont créées en DB, mais naf_mapping.py n'est pas à jour"))
+
     def _create_missing_prolocalisations(self):
         """Crée les ProLocalisations manquantes pour toutes les entreprises."""
         self.stdout.write("\n🔗 Création des ProLocalisations...")
         
-        from foxreviews.subcategory.naf_mapping import get_subcategory_from_naf
+        # Étape 1 : Charger TOUTES les sous-catégories en mémoire (1 query)
+        self.stdout.write("   📊 Chargement des sous-catégories...")
+        naf_to_sous_cat = {}
+        for sous_cat in SousCategorie.objects.select_related('categorie').all():
+            # Extraire le code NAF du slug (format: activite-8412z-8412z ou developpement-web)
+            slug_parts = sous_cat.slug.split('-')
+            for part in slug_parts:
+                if part and (part[0].isdigit() or part[:2].isdigit()):
+                    naf_to_sous_cat[part.upper()] = sous_cat
         
-        entreprises_sans_proloc = Entreprise.objects.filter(
-            pro_localisations__isnull=True,
-            is_active=True,
+        # Étape 2 : Charger TOUTES les villes en mémoire (1 query)
+        self.stdout.write("   📊 Chargement des villes...")
+        villes_by_nom = {}  # {nom.lower(): Ville}
+        villes_by_postal = {}  # {code_postal: Ville}
+        
+        for ville in Ville.objects.all():
+            if ville.nom:
+                villes_by_nom[ville.nom.lower()] = ville
+            if ville.code_postal_principal:
+                villes_by_postal[ville.code_postal_principal] = ville
+        
+        # Étape 3 : Charger les ProLocalisations existantes pour éviter les doublons (1 query)
+        self.stdout.write("   📊 Vérification des ProLocalisations existantes...")
+        existing_proloc_keys = set(
+            ProLocalisation.objects.values_list(
+                'entreprise_id', 'sous_categorie_id', 'ville_id'
+            )
         )
         
-        created_count = 0
-        error_count = 0
+        # Étape 4 : Récupérer toutes les entreprises sans ProLocalisation (1 query)
+        self.stdout.write("   📊 Chargement des entreprises...")
+        entreprises_sans_proloc = list(
+            Entreprise.objects.filter(
+                pro_localisations__isnull=True,
+                is_active=True,
+            ).values('id', 'siren', 'naf_code', 'ville_nom', 'code_postal')
+        )
         
-        for entreprise in entreprises_sans_proloc.iterator():
+        total_count = len(entreprises_sans_proloc)
+        self.stdout.write(f"   📊 {total_count} entreprises à traiter")
+        
+        # Étape 5 : Créer les ProLocalisations en batch
+        prolocalisations_to_create = []
+        skipped_no_sous_cat = 0
+        skipped_no_ville = 0
+        skipped_duplicate = 0
+        
+        for entreprise_data in entreprises_sans_proloc:
             try:
                 # Trouver la sous-catégorie
-                sous_cat = get_subcategory_from_naf(entreprise.naf_code)
-                if not sous_cat:
-                    # Utiliser la sous-catégorie créée automatiquement
-                    sous_cat_slug = slugify(f"{entreprise.naf_libelle[:40]}-{entreprise.naf_code}")
-                    sous_cat = SousCategorie.objects.filter(slug=sous_cat_slug).first()
+                naf_normalized = entreprise_data['naf_code'].upper() if entreprise_data['naf_code'] else None
+                sous_cat = naf_to_sous_cat.get(naf_normalized)
                 
                 if not sous_cat:
+                    skipped_no_sous_cat += 1
                     continue
                 
-                # Trouver la ville
-                ville = Ville.objects.filter(
-                    nom__iexact=entreprise.ville_nom
-                ).first()
+                # Trouver la ville (priorité: nom, puis code postal)
+                ville = None
+                if entreprise_data['ville_nom']:
+                    ville = villes_by_nom.get(entreprise_data['ville_nom'].lower())
                 
-                if not ville and entreprise.code_postal:
-                    ville = Ville.objects.filter(
-                        code_postal_principal=entreprise.code_postal
-                    ).first()
+                if not ville and entreprise_data['code_postal']:
+                    ville = villes_by_postal.get(entreprise_data['code_postal'])
                 
                 if not ville:
+                    skipped_no_ville += 1
                     continue
                 
-                # Créer la ProLocalisation
-                ProLocalisation.objects.get_or_create(
-                    entreprise=entreprise,
-                    sous_categorie=sous_cat,
-                    ville=ville,
-                    defaults={
-                        "is_active": True,
-                        "is_verified": False,
-                    },
+                # Vérifier si existe déjà
+                proloc_key = (entreprise_data['id'], sous_cat.id, ville.id)
+                if proloc_key in existing_proloc_keys:
+                    skipped_duplicate += 1
+                    continue
+                
+                # Préparer la ProLocalisation
+                prolocalisations_to_create.append(
+                    ProLocalisation(
+                        entreprise_id=entreprise_data['id'],
+                        sous_categorie=sous_cat,
+                        ville=ville,
+                        is_active=True,
+                        is_verified=False,
+                    )
                 )
                 
-                created_count += 1
-                
             except Exception as e:
-                logger.error(f"Erreur création ProLocalisation pour {entreprise.siren}: {e}")
-                error_count += 1
+                logger.error(f"Erreur préparation ProLocalisation pour {entreprise_data['siren']}: {e}")
         
+        # Étape 6 : Bulk insert (1 query)
+        if prolocalisations_to_create:
+            self.stdout.write(f"   💾 Insertion en base de {len(prolocalisations_to_create)} ProLocalisations...")
+            ProLocalisation.objects.bulk_create(
+                prolocalisations_to_create,
+                batch_size=1000,
+                ignore_conflicts=True,
+            )
+        
+        # Résumé
+        created_count = len(prolocalisations_to_create)
         self.stdout.write(f"   ✅ {created_count} ProLocalisations créées")
-        if error_count > 0:
-            self.stdout.write(f"   ⚠️  {error_count} erreurs")
+        if skipped_no_sous_cat > 0:
+            self.stdout.write(f"   ⚠️  {skipped_no_sous_cat} entreprises sans sous-catégorie trouvée")
+        if skipped_no_ville > 0:
+            self.stdout.write(f"   ⚠️  {skipped_no_ville} entreprises sans ville trouvée")
+        if skipped_duplicate > 0:
+            self.stdout.write(f"   ℹ️  {skipped_duplicate} doublons évités")
