@@ -13,7 +13,15 @@ SECRET_KEY = env(
     default="VHfK5FeX53pTrIc3A8kFg5172awraFz9VuvkaTfYqkax4LdkF70NtgZxsv2nlkhi",
 )
 # https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts
-ALLOWED_HOSTS = ["localhost", "0.0.0.0", "127.0.0.1", "135.125.74.206", "fox-reviews.com", "api.foxreviews.com"]  # noqa: S104
+# NB: ALLOWED_HOSTS ne doit contenir que le host (sans schéma ni port)
+ALLOWED_HOSTS = [
+    "localhost",
+    "0.0.0.0",
+    "127.0.0.1",
+    "135.125.74.206",
+    "fox-reviews.com",
+    "api.foxreviews.com",
+]  # noqa: S104
 
 # CORS
 # ------------------------------------------------------------------------------
@@ -21,6 +29,7 @@ ALLOWED_HOSTS = ["localhost", "0.0.0.0", "127.0.0.1", "135.125.74.206", "fox-rev
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://135.125.74.206:3005",
 ]
 CORS_ALLOW_CREDENTIALS = True
 
