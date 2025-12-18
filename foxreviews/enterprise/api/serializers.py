@@ -99,6 +99,70 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
         ]
 
 
+class SearchResultSerializer(serializers.ModelSerializer):
+    """Serializer pour résultats de recherche avec avis IA."""
+
+    nom = serializers.CharField(source="entreprise.nom", read_only=True)
+    slug = serializers.SerializerMethodField()
+    ville = serializers.CharField(source="ville.nom", read_only=True)
+    categorie = serializers.CharField(
+        source="sous_categorie.categorie.slug",
+        read_only=True,
+    )
+    sous_categorie = serializers.CharField(
+        source="sous_categorie.slug",
+        read_only=True,
+    )
+    avis_redaction = serializers.SerializerMethodField()
+    is_sponsored = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProLocalisation
+        fields = [
+            "id",
+            "nom",
+            "slug",
+            "ville",
+            "categorie",
+            "sous_categorie",
+            "avis_redaction",
+            "note_moyenne",
+            "nb_avis",
+            "score_global",
+            "is_sponsored",
+        ]
+
+    def get_slug(self, obj):
+        """Génère le slug de la ProLocalisation."""
+        from django.utils.text import slugify
+        return slugify(
+            f"{obj.entreprise.nom}-{obj.sous_categorie.nom}-{obj.ville.nom}",
+        )
+
+    def get_avis_redaction(self, obj):
+        """
+        Retourne l'avis rédactionnel (généré par IA).
+        Si le champ texte_long_entreprise existe, on l'utilise.
+        Sinon, on génère un avis par défaut.
+        """
+        if obj.texte_long_entreprise:
+            # Extraire les 2 premières phrases
+            sentences = obj.texte_long_entreprise.split(". ")
+            return ". ".join(sentences[:2]) + "." if len(sentences) >= 2 else sentences[0]
+
+        # Avis par défaut si pas encore généré
+        return (
+            f"{obj.entreprise.nom} est une entreprise spécialisée en "
+            f"{obj.sous_categorie.nom} à {obj.ville.nom}. "
+            f"Cette entreprise se distingue par son expertise et son professionnalisme."
+        )
+
+    def get_is_sponsored(self, obj):
+        """Indique si la ProLocalisation est sponsorisée."""
+        # Vérifié dans le contexte (passé depuis la vue)
+        return self.context.get("is_sponsored", False)
+
+
 class ProLocalisationDetailSerializer(ProLocalisationListSerializer):
     """Serializer détaillé pour ProLocalisation."""
 

@@ -15,7 +15,7 @@ from rest_framework.response import Response
 
 from foxreviews.category.models import Categorie
 from foxreviews.core.services import SponsorshipService
-from foxreviews.enterprise.api.serializers import ProLocalisationListSerializer
+from foxreviews.enterprise.api.serializers import SearchResultSerializer
 from foxreviews.enterprise.models import ProLocalisation
 from foxreviews.location.models import Ville
 from foxreviews.subcategory.models import SousCategorie
@@ -41,12 +41,9 @@ class SearchRequestSerializer(serializers.Serializer):
 class SearchResultsSerializer(serializers.Serializer):
     """Résultats de recherche"""
 
-    sponsored = ProLocalisationListSerializer(many=True)
-    organic = ProLocalisationListSerializer(many=True)
-    total = serializers.IntegerField()
-    page = serializers.IntegerField()
-    page_size = serializers.IntegerField()
-    has_next = serializers.BooleanField()
+    sponsored = SearchResultSerializer(many=True)
+    organic = SearchResultSerializer(many=True)
+    meta = serializers.DictField()
     filters = serializers.DictField()
 
 
@@ -200,27 +197,38 @@ def search_enterprises(request):
         "-score_global", "-note_moyenne", "-nb_avis",
     )[start:end]
 
-    # Sérialisation
-    sponsored_data = ProLocalisationListSerializer(
-        sponsored_prolocalisations, many=True, context={"request": request},
+    # Sérialisation avec contexte pour is_sponsored
+    sponsored_data = SearchResultSerializer(
+        sponsored_prolocalisations,
+        many=True,
+        context={"request": request, "is_sponsored": True},
     ).data
 
-    organic_data = ProLocalisationListSerializer(
-        organic_prolocalisations, many=True, context={"request": request},
+    organic_data = SearchResultSerializer(
+        organic_prolocalisations,
+        many=True,
+        context={"request": request, "is_sponsored": False},
     ).data
 
     # Calculer has_next
     total_organic = organic_queryset.count()
     has_next = end < total_organic
 
+    # Format de réponse conforme à l'attendu
     return Response(
         {
             "sponsored": sponsored_data,
             "organic": organic_data,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "has_next": has_next,
+            "meta": {
+                "total_results": total,
+                "sponsored_count": len(sponsored_prolocalisations),
+                "organic_count": len(organic_prolocalisations),
+                "page": page,
+                "page_size": page_size,
+                "has_next": has_next,
+                "rotation_active": len(sponsored_prolocalisations) > 0,
+                "sponsoring_active": True,
+            },
             "filters": filters_applied,
         },
     )
