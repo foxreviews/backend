@@ -78,6 +78,23 @@ class Command(BaseCommand):
             type=str,
             help="Fichier CSV contenant des SIREN (un par ligne)",
         )
+        parser.add_argument(
+            "--etat",
+            type=str,
+            default="A",
+            choices=["A", "F", "all"],
+            help="État administratif: A (actifs), F (fermés), all (tous). Défaut: A",
+        )
+        parser.add_argument(
+            "--tranche-effectifs",
+            type=str,
+            help="Tranche d'effectifs (ex: '12' pour 10-19 salariés)",
+        )
+        parser.add_argument(
+            "--commune",
+            type=str,
+            help="Code commune exact (ex: '75056' pour Paris)",
+        )
 
         # Limites
         parser.add_argument(
@@ -177,29 +194,44 @@ class Command(BaseCommand):
         Returns:
             Requête multicritères INSEE
         """
+        # Si requête personnalisée fournie, l'utiliser telle quelle
         if options["query"]:
             return options["query"]
 
         query_parts = []
 
-        # Filtre par NAF
-        if options["naf"]:
-            naf = options["naf"]
-            # Ajouter * si pas déjà présent pour wildcard
-            if not naf.endswith("*"):
-                naf = f"{naf}*"
-            query_parts.append(f"activitePrincipaleEtablissement:{naf}")
-
-        # Filtre par département
-        if options["departement"]:
+        # Filtre par commune exacte (prioritaire sur département)
+        if options.get("commune"):
+            commune = options["commune"]
+            query_parts.append(f"codeCommuneEtablissement:{commune}")
+        # Sinon filtre par département
+        elif options.get("departement"):
             dept = options["departement"]
             # Le code commune commence par le département
             query_parts.append(f"codeCommuneEtablissement:{dept}*")
 
-        # Par défaut: uniquement les établissements actifs
-        query_parts.append("etatAdministratifEtablissement:A")
+        # Filtre par NAF
+        if options.get("naf"):
+            naf = options["naf"]
+            # Ajouter * seulement si c'est une recherche partielle
+            # Un code NAF complet contient un point (ex: 62.01Z)
+            # Un code partiel n'en contient pas (ex: 62)
+            if not naf.endswith("*") and "." not in naf:
+                naf = f"{naf}*"
+            query_parts.append(f"activitePrincipaleEtablissement:{naf}")
 
-        return " AND ".join(query_parts)
+        # Filtre par tranche d'effectifs
+        if options.get("tranche_effectifs"):
+            tranche = options["tranche_effectifs"]
+            query_parts.append(f"trancheEffectifsEtablissement:{tranche}")
+
+        # État administratif (actif/fermé/tous)
+        etat = options.get("etat", "A")
+        if etat != "all":
+            query_parts.append(f"etatAdministratifEtablissement:{etat}")
+
+        # L'API INSEE utilise la syntaxe Lucene avec des espaces (pas "AND")
+        return " ".join(query_parts)
 
     def _import_from_api(self, options: dict[str, Any]):
         """Import depuis l'API INSEE."""
@@ -535,16 +567,61 @@ class Command(BaseCommand):
         """
         Crée automatiquement une ProLocalisation pour l'entreprise.
 
-        Note: La création de ProLocalisation nécessite un mapping NAF -> SousCategorie
-        qui doit être implémenté dans une tâche séparée (Task #9 du todo).
-
-        Pour l'instant, cette fonction est désactivée en attendant le mapping.
+        Utilise le mapping NAF → SousCategorie pour associer l'entreprise
+        à la bonne sous-catégorie de métier.
         """
-        # Désactivé en attendant l'implémentation du mapping NAF -> SousCategorie (Task #9)
-        logger.debug(
-            f"Création ProLocalisation skipped pour {entreprise.nom} - "
-            f"En attente du mapping NAF {naf_code} → SousCategorie",
-        )
+        from foxreviews.enterprise.models import ProLocalisation
+        from foxreviews.location.models import Ville
+        from foxreviews.subcategory.naf_mapping import get_subcategory_from_naf
+
+        # 1. Trouver la sous-catégorie via le code NAF
+        sous_categorie = get_subcategory_from_naf(naf_code)
+        if not sous_categorie:
+            logger.debug(
+                f"Pas de mapping NAF {naf_code} → SousCategorie pour {entreprise.nom}"
+            )
+            return
+
+        # 2. Trouver la ville correspondante
+        # Essayer de matcher par nom et code postal
+        ville = None
+        if entreprise.code_postal and ville_nom:
+            ville = Ville.objects.filter(
+                nom__iexact=ville_nom,
+                code_postal_principal=entreprise.code_postal,
+            ).first()
+
+        if not ville:
+            # Essayer juste par nom
+            ville = Ville.objects.filter(nom__iexact=ville_nom).first()
+
+        if not ville:
+            logger.debug(
+                f"Ville '{ville_nom}' non trouvée pour {entreprise.nom}"
+            )
+            return
+
+        # 3. Créer la ProLocalisation si elle n'existe pas
+        try:
+            proloc, created = ProLocalisation.objects.get_or_create(
+                entreprise=entreprise,
+                sous_categorie=sous_categorie,
+                ville=ville,
+                defaults={
+                    "is_active": True,
+                    "is_verified": False,
+                }
+            )
+            
+            if created:
+                logger.debug(
+                    f"✅ ProLocalisation créée: {entreprise.nom} - "
+                    f"{sous_categorie.nom} - {ville.nom}"
+                )
+        except Exception as e:
+            logger.exception(
+                f"Erreur création ProLocalisation pour {entreprise.nom}: {e}"
+            )
 
     def _save_checkpoint(self, options: dict[str, Any], cursor_position: int = 0):
         """Sauvegarde un checkpoint pour reprendre après erreur."""

@@ -21,7 +21,7 @@ services:
       - ./.envs/.local/.django
       - ./.envs/.local/.postgres
     ports:
-      - '8000:8000'
+      - '8003:8000'
     command: /start
 
   postgres:
@@ -40,7 +40,7 @@ services:
     image: docker.io/axllent/mailpit:latest
     container_name: foxreviews_local_mailpit
     ports:
-      - "8025:8025"
+      - "8028:8025"
 
   redis:
     image: docker.io/redis:7.2
@@ -75,5 +75,5 @@ services:
     image: foxreviews_local_flower
     container_name: foxreviews_local_flower
     ports:
-      - '5555:5555'
+      - '5558:5555'
     command: /start-flower

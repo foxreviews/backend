@@ -2,7 +2,7 @@
 # ------------------------------------------------------------------------------
 USE_DOCKER=yes
 IPYTHONDIR=/app/.ipython
-DATABASE_URL=postgres://postgres:nalisoarab@localhost:5432/foxreviews
+DATABASE_URL=postgres://debug:debug@postgres:5432/foxreviews
 # Redis
 # ------------------------------------------------------------------------------
 REDIS_URL=redis://redis:6379/0

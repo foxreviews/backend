@@ -75,7 +75,7 @@ class UserProfile(models.Model):
         help_text=_("Rôle de l'utilisateur dans le système FOX-Reviews."),
     )
     entreprise = models.ForeignKey(
-        "core.Entreprise",
+        "enterprise.Entreprise",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
