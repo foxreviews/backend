@@ -230,8 +230,8 @@ class Command(BaseCommand):
         if etat != "all":
             query_parts.append(f"etatAdministratifEtablissement:{etat}")
 
-        # L'API INSEE utilise la syntaxe Lucene avec des espaces (pas "AND")
-        return " ".join(query_parts)
+        # L'API INSEE utilise des virgules comme séparateur de critères
+        return ",".join(query_parts)
 
     def _import_from_api(self, options: dict[str, Any]):
         """Import depuis l'API INSEE."""
