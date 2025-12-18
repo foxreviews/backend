@@ -1,0 +1,18 @@
+# Codes NAF Informatique - Secteur numérique
+# Un code NAF par ligne, les lignes commençant par # sont ignorées
+
+# === PROGRAMMATION & DÉVELOPPEMENT ===
+62.01Z
+62.02A
+62.02B
+62.09Z
+
+# === HÉBERGEMENT & TRAITEMENT DE DONNÉES ===
+63.11Z
+63.12Z
+
+# === ÉDITION DE LOGICIELS ===
+58.21Z
+58.29A
+58.29B
+58.29C

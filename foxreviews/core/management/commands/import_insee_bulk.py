@@ -69,6 +69,16 @@ class Command(BaseCommand):
             help="Code NAF pour filtrer par activité (ex: '62.01Z' ou '62*' pour tous les 62)",
         )
         parser.add_argument(
+            "--naf-list",
+            type=str,
+            help="Liste de codes NAF séparés par des virgules (ex: '62.01Z,62.02A,62.02B')",
+        )
+        parser.add_argument(
+            "--naf-file",
+            type=str,
+            help="Fichier contenant une liste de codes NAF (un par ligne)",
+        )
+        parser.add_argument(
             "--departement",
             type=str,
             help="Numéro de département (ex: '75', '13', '69')",
@@ -145,6 +155,11 @@ class Command(BaseCommand):
         self.checkpoint_file = options["checkpoint_file"]
 
         try:
+            # Traitement spécial pour --naf-list et --naf-file
+            if options.get("naf_list") or options.get("naf_file"):
+                self._import_multiple_naf(options)
+                return
+
             # Validation des arguments
             if not any(
                 [
@@ -157,7 +172,7 @@ class Command(BaseCommand):
             ):
                 msg = (
                     "Vous devez spécifier au moins une source de données: "
-                    "--query, --naf, --departement, --commune ou --csv-file"
+                    "--query, --naf, --naf-list, --naf-file, --departement, --commune ou --csv-file"
                 )
                 raise CommandError(
                     msg,
@@ -823,6 +838,109 @@ class Command(BaseCommand):
 
         # Traitement
         self._process_etablissements_batch(etablissements, options)
+
+    def _import_multiple_naf(self, options: dict[str, Any]):
+        """
+        Import groupé pour plusieurs codes NAF.
+        
+        Supporte --naf-list (liste séparée par virgules) ou --naf-file (fichier texte).
+        """
+        naf_codes = []
+        
+        # Lire depuis --naf-list
+        if options.get("naf_list"):
+            naf_codes = [code.strip() for code in options["naf_list"].split(",") if code.strip()]
+            self.stdout.write(
+                self.style.SUCCESS(f"\n📋 Import groupé de {len(naf_codes)} codes NAF (depuis --naf-list)")
+            )
+        
+        # Lire depuis --naf-file
+        elif options.get("naf_file"):
+            naf_file = Path(options["naf_file"])
+            
+            if not naf_file.exists():
+                msg = f"Fichier NAF introuvable: {naf_file}"
+                raise CommandError(msg)
+            
+            with open(naf_file, encoding="utf-8") as f:
+                for line in f:
+                    code = line.strip()
+                    # Ignorer les lignes vides et les commentaires
+                    if code and not code.startswith("#"):
+                        naf_codes.append(code)
+            
+            self.stdout.write(
+                self.style.SUCCESS(f"\n📋 Import groupé de {len(naf_codes)} codes NAF (depuis {naf_file})")
+            )
+        
+        if not naf_codes:
+            msg = "Aucun code NAF trouvé"
+            raise CommandError(msg)
+        
+        # Afficher la liste
+        self.stdout.write("   Codes NAF à importer:")
+        for code in naf_codes:
+            self.stdout.write(f"      • {code}")
+        
+        # Import séquentiel de chaque code NAF
+        total_stats = {
+            "created": 0,
+            "updated": 0,
+            "skipped": 0,
+            "errors": 0,
+            "total_fetched": 0,
+        }
+        
+        for i, naf_code in enumerate(naf_codes, 1):
+            self.stdout.write(
+                self.style.SUCCESS(f"\n{'='*60}\n📊 [{i}/{len(naf_codes)}] Import NAF: {naf_code}\n{'='*60}")
+            )
+            
+            # Copier les options et forcer le code NAF
+            import_options = options.copy()
+            import_options["naf"] = naf_code
+            import_options["naf_list"] = None
+            import_options["naf_file"] = None
+            
+            # Réinitialiser les stats pour ce code NAF
+            self.stats = {
+                "created": 0,
+                "updated": 0,
+                "skipped": 0,
+                "errors": 0,
+                "total_fetched": 0,
+                "start_time": timezone.now(),
+                "end_time": None,
+            }
+            
+            try:
+                # Importer pour ce code NAF
+                self._import_from_api(import_options)
+                
+                # Cumuler les stats
+                total_stats["created"] += self.stats["created"]
+                total_stats["updated"] += self.stats["updated"]
+                total_stats["skipped"] += self.stats["skipped"]
+                total_stats["errors"] += self.stats["errors"]
+                total_stats["total_fetched"] += self.stats["total_fetched"]
+                
+            except Exception as e:
+                self.stdout.write(
+                    self.style.ERROR(f"❌ Erreur pour NAF {naf_code}: {e!s}")
+                )
+                total_stats["errors"] += 1
+                continue
+        
+        # Afficher les stats globales
+        self.stdout.write(
+            self.style.SUCCESS(f"\n{'='*60}\n🎯 STATISTIQUES GLOBALES\n{'='*60}")
+        )
+        self.stdout.write(f"   📥 Total récupéré: {total_stats['total_fetched']}")
+        self.stdout.write(f"   ✅ Créées: {total_stats['created']}")
+        self.stdout.write(f"   🔄 Mises à jour: {total_stats['updated']}")
+        self.stdout.write(f"   ⏭️  Ignorées: {total_stats['skipped']}")
+        self.stdout.write(f"   ❌ Erreurs: {total_stats['errors']}")
+        self.stdout.write("=" * 60 + "\n")
 
     def _display_final_stats(self):
         """Affiche les statistiques finales."""

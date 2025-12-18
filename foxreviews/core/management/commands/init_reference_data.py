@@ -69,17 +69,24 @@ class Command(BaseCommand):
         """Crée les catégories et sous-catégories."""
         self.stdout.write("\n📁 Création des catégories et sous-catégories...")
 
-        # Structure : {categorie: [sous_categories]}
+        # Structure basée sur les sections NAF INSEE
+        # Format : {categorie: [sous_categories]}
         categories_data = {
-            "Informatique": [
+            # === SECTION J : Information et Communication ===
+            "Informatique et Communication": [
                 "Développement Web",
                 "Développement Mobile",
                 "Infogérance",
                 "Cybersécurité",
                 "Data Science",
                 "DevOps",
+                "Conseil Informatique",
+                "Hébergement Web",
+                "Télécommunications",
             ],
-            "Bâtiment": [
+            
+            # === SECTION F : Construction ===
+            "Bâtiment et Construction": [
                 "Plombier",
                 "Plombier Chauffagiste",
                 "Électricien",
@@ -91,44 +98,132 @@ class Command(BaseCommand):
                 "Peintre Bâtiment",
                 "Couvreur",
                 "Couvreur Zingueur",
-            ],
-            "Chauffage & Climatisation": [
                 "Chauffagiste",
                 "Climatisation",
                 "Pompe à Chaleur",
             ],
-            "Nettoyage": [
-                "Entreprise Nettoyage",
-                "Nettoyage Industriel",
-                "Nettoyage Bureaux",
-            ],
-            "Jardinage & Paysage": [
-                "Paysagiste",
-                "Jardinier",
-                "Élagage",
-            ],
-            "Déménagement": [
-                "Déménageur",
-                "Garde-Meuble",
-            ],
-            "Serrurerie": [
-                "Serrurier",
-                "Serrurier d'Urgence",
-            ],
-            "Rénovation": [
-                "Artisan Rénovation",
-                "Artisan Isolation",
-                "Rénovation Énergétique",
-            ],
-            "Restauration": [
+            
+            # === SECTION I : Hébergement et Restauration ===
+            "Restauration et Hôtellerie": [
                 "Restaurant",
+                "Restaurant Rapide",
                 "Traiteur",
+                "Café Bar",
                 "Boulangerie Pâtisserie",
+                "Hôtel",
+                "Chambre d'Hôtes",
             ],
-            "Commerce": [
+            
+            # === SECTION G : Commerce ===
+            "Commerce et Distribution": [
                 "Commerce de Détail",
                 "E-commerce",
                 "Franchise",
+                "Supermarché",
+                "Commerce Alimentaire",
+                "Commerce Textile",
+            ],
+            
+            # === SECTION H : Transports ===
+            "Transports et Logistique": [
+                "Déménageur",
+                "Garde-Meuble",
+                "Transport Routier",
+                "Taxi VTC",
+                "Livraison",
+            ],
+            
+            # === SECTION N : Services Administratifs ===
+            "Services aux Entreprises": [
+                "Nettoyage Bureaux",
+                "Nettoyage Industriel",
+                "Entretien Locaux",
+                "Sécurité Gardiennage",
+                "Location Matériel",
+            ],
+            
+            # === SECTION M : Activités Spécialisées ===
+            "Services Professionnels": [
+                "Comptabilité",
+                "Juridique Avocat",
+                "Architecture",
+                "Ingénierie",
+                "Marketing Communication",
+                "Design Graphique",
+            ],
+            
+            # === SECTION A : Agriculture ===
+            "Jardinage et Paysage": [
+                "Paysagiste",
+                "Jardinier",
+                "Élagage",
+                "Entretien Espaces Verts",
+                "Pépinière",
+            ],
+            
+            # === SECTION S : Autres Services ===
+            "Services à la Personne": [
+                "Coiffure",
+                "Esthétique Beauté",
+                "Pressing Blanchisserie",
+                "Réparation",
+                "Serrurier",
+                "Serrurier d'Urgence",
+            ],
+            
+            # === SECTION Q : Santé ===
+            "Santé et Bien-être": [
+                "Médecin",
+                "Dentiste",
+                "Kinésithérapeute",
+                "Ostéopathe",
+                "Pharmacie",
+                "Laboratoire Analyse",
+            ],
+            
+            # === SECTION P : Enseignement ===
+            "Enseignement et Formation": [
+                "Auto-École",
+                "Soutien Scolaire",
+                "Formation Professionnelle",
+                "École Musique",
+                "École Langues",
+            ],
+            
+            # === SECTION R : Arts et Spectacles ===
+            "Loisirs et Culture": [
+                "Salle de Sport",
+                "Centre Loisirs",
+                "Cinéma Théâtre",
+                "Musée Galerie",
+                "Organisation Événements",
+            ],
+            
+            # === SECTION L : Immobilier ===
+            "Immobilier": [
+                "Agence Immobilière",
+                "Syndic Copropriété",
+                "Gestion Locative",
+                "Diagnostic Immobilier",
+                "Transaction Immobilière",
+            ],
+            
+            # === SECTION K : Activités Financières ===
+            "Finances et Assurance": [
+                "Banque",
+                "Assurance",
+                "Courtage Assurance",
+                "Conseiller Financier",
+                "Crédit",
+            ],
+            
+            # === SECTION C : Industrie Manufacturière (B2B principalement) ===
+            "Artisanat et Production": [
+                "Artisan Rénovation",
+                "Artisan Isolation",
+                "Métallerie Serrurerie",
+                "Ébénisterie",
+                "Imprimerie",
             ],
         }
 

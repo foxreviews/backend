@@ -1,0 +1,20 @@
+# Codes NAF Restauration et Hôtellerie (Section I)
+# Hébergement de courte durée et restauration
+
+# === RESTAURATION ===
+56.10A
+56.10B
+56.10C
+56.21Z
+56.30Z
+
+# === BOULANGERIE / PÂTISSERIE ===
+10.71A
+10.71B
+10.71C
+10.71D
+
+# === HÔTELLERIE ===
+55.10Z
+55.20Z
+55.30Z

@@ -19,55 +19,96 @@ Usage:
 from django.core.cache import cache
 
 # Mapping NAF → Slug de SousCategorie
-# À compléter en fonction de vos catégories
+# Mapping complet basé sur la nomenclature INSEE
 NAF_TO_SUBCATEGORY = {
-    # === PLOMBERIE ===
+    # === INFORMATIQUE (Section J) ===
+    "62.01Z": "developpement-web",  # Programmation informatique
+    "62.02A": "conseil-informatique",  # Conseil en systèmes et logiciels informatiques
+    "62.02B": "infogerance",  # Tierce maintenance de systèmes et d'applications informatiques
+    "62.03Z": "infogerance",  # Gestion d'installations informatiques
+    "62.09Z": "developpement-web",  # Autres activités informatiques
+    "63.11Z": "hebergement-web",  # Traitement de données, hébergement et activités connexes
+    "63.12Z": "developpement-web",  # Portails Internet
+    "58.21Z": "developpement-web",  # Édition de jeux électroniques
+    "58.29A": "developpement-web",  # Édition de logiciels système et de réseau
+    "58.29B": "developpement-web",  # Édition de logiciels outils de développement et de langages
+    "58.29C": "developpement-web",  # Édition de logiciels applicatifs
+    
+    # === BÂTIMENT - PLOMBERIE ===
     "43.22A": "plombier",
     "43.22B": "plombier-chauffagiste",
     
-    # === ÉLECTRICITÉ ===
+    # === BÂTIMENT - ÉLECTRICITÉ ===
     "43.21A": "electricien",
     "43.21B": "electricien-batiment",
     
-    # === MENUISERIE ===
+    # === BÂTIMENT - MENUISERIE ===
     "43.32A": "menuisier",
     "43.32B": "menuisier-charpentier",
     "16.23Z": "menuisier",
     
-    # === MAÇONNERIE ===
+    # === BÂTIMENT - MAÇONNERIE ===
     "43.99A": "macon",
     "43.99B": "macon-renovation",
+    "41.20A": "macon",
+    "41.20B": "macon",
     
-    # === PEINTURE ===
+    # === BÂTIMENT - PEINTURE ===
     "43.34Z": "peintre-batiment",
     
-    # === COUVERTURE / TOITURE ===
+    # === BÂTIMENT - COUVERTURE ===
     "43.91A": "couvreur",
     "43.91B": "couvreur-zingueur",
     
-    # === CHAUFFAGE / CLIMATISATION ===
+    # === BÂTIMENT - CHAUFFAGE / CLIMATISATION ===
     "43.22A": "chauffagiste",
     "43.22B": "climatisation",
     
-    # === SERRURERIE ===
+    # === BÂTIMENT - AUTRES ===
     "43.32C": "serrurier",
-    
-    # === NETTOYAGE ===
-    "81.21Z": "entreprise-nettoyage",
-    "81.22Z": "nettoyage-industriel",
-    
-    # === JARDINAGE / PAYSAGISTE ===
-    "81.30Z": "paysagiste",
-    "01.30Z": "jardinier",
-    
-    # === DÉMÉNAGEMENT ===
-    "49.42Z": "demenageur",
-    
-    # === AUTRES ARTISANS ===
     "43.99C": "artisan-renovation",
     "43.99D": "artisan-isolation",
     
-    # À compléter selon vos besoins...
+    # === RESTAURATION (Section I) ===
+    "56.10A": "restaurant",  # Restauration traditionnelle
+    "56.10B": "restaurant-rapide",  # Cafétérias et autres libres-services
+    "56.10C": "restaurant-rapide",  # Restauration de type rapide
+    "56.21Z": "traiteur",  # Services des traiteurs
+    "56.30Z": "cafe-bar",  # Débits de boissons
+    "10.71A": "boulangerie-patisserie",  # Fabrication industrielle de pain et de pâtisserie fraîche
+    "10.71B": "boulangerie-patisserie",  # Cuisson de produits de boulangerie
+    "10.71C": "boulangerie-patisserie",  # Boulangerie et boulangerie-pâtisserie
+    "10.71D": "boulangerie-patisserie",  # Pâtisserie
+    
+    # === HÔTELLERIE ===
+    "55.10Z": "hotel",  # Hôtels et hébergement similaire
+    "55.20Z": "chambre-d-hotes",  # Hébergement touristique et autre hébergement de courte durée
+    "55.30Z": "chambre-d-hotes",  # Terrains de camping et parcs pour caravanes
+    
+    # === NETTOYAGE (Section N) ===
+    "81.21Z": "nettoyage-bureaux",  # Nettoyage courant des bâtiments
+    "81.22Z": "nettoyage-industriel",  # Autres activités de nettoyage des bâtiments
+    
+    # === JARDINAGE (Section A) ===
+    "81.30Z": "paysagiste",  # Services d'aménagement paysager
+    "01.30Z": "jardinier",  # Reproduction de plantes
+    
+    # === TRANSPORTS (Section H) ===
+    "49.42Z": "demenageur",  # Services de déménagement
+    
+    # === SERVICES À LA PERSONNE (Section S) ===
+    "96.02A": "coiffure",  # Coiffure
+    "96.02B": "esthetique-beaute",  # Soins de beauté
+    "96.04Z": "esthetique-beaute",  # Entretien corporel
+    "96.01A": "pressing-blanchisserie",  # Blanchisserie-teinturerie de gros
+    "96.01B": "pressing-blanchisserie",  # Blanchisserie-teinturerie de détail
+    "80.20Z": "serrurier",  # Activités liées aux systèmes de sécurité
+    "95.22Z": "reparation",  # Réparation d'appareils électroménagers
+    "95.23Z": "reparation",  # Réparation de chaussures et d'articles en cuir
+    "95.24Z": "reparation",  # Réparation de meubles et d'équipements du foyer
+    "95.25Z": "reparation",  # Réparation d'articles d'horlogerie et de bijouterie
+    "95.29Z": "reparation",  # Réparation d'autres biens personnels et domestiques
+    
 }
 
 

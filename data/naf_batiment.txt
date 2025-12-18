@@ -1,0 +1,37 @@
+# Codes NAF Bâtiment et Construction (Section F)
+# Construction de bâtiments, génie civil et travaux spécialisés
+
+# === PLOMBERIE ===
+43.22A
+43.22B
+
+# === ÉLECTRICITÉ ===
+43.21A
+43.21B
+
+# === MENUISERIE ===
+43.32A
+43.32B
+16.23Z
+
+# === MAÇONNERIE ===
+43.99A
+43.99B
+41.20A
+41.20B
+
+# === PEINTURE ===
+43.34Z
+
+# === COUVERTURE ===
+43.91A
+43.91B
+
+# === CHAUFFAGE / CLIMATISATION ===
+43.22A
+43.22B
+
+# === AUTRES ===
+43.32C
+43.99C
+43.99D

@@ -1,0 +1,22 @@
+# Codes NAF Services à la Personne (Section S)
+# Activités associatives et services personnels
+
+# === COIFFURE / ESTHÉTIQUE ===
+96.02A
+96.02B
+96.04Z
+
+# === PRESSING / BLANCHISSERIE ===
+96.01A
+96.01B
+
+# === SERRURERIE ===
+43.32C
+80.20Z
+
+# === RÉPARATION ===
+95.22Z
+95.23Z
+95.24Z
+95.25Z
+95.29Z
