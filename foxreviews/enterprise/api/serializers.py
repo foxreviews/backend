@@ -150,10 +150,18 @@ class SearchResultSerializer(serializers.ModelSerializer):
             sentences = obj.texte_long_entreprise.split(". ")
             return ". ".join(sentences[:2]) + "." if len(sentences) >= 2 else sentences[0]
 
+        # Déterminer le nom de l'activité (éviter les codes NAF génériques)
+        activite_nom = obj.sous_categorie.nom
+        
+        # Si c'est un code générique "Activité XX.XXZ", utiliser la catégorie
+        if activite_nom.startswith("Activité ") and activite_nom[-1].isalpha():
+            # Format: "Activité XX.XXZ" -> utiliser la catégorie parente
+            activite_nom = obj.sous_categorie.categorie.nom.lower()
+        
         # Avis par défaut si pas encore généré
         return (
             f"{obj.entreprise.nom} est une entreprise spécialisée en "
-            f"{obj.sous_categorie.nom} à {obj.ville.nom}. "
+            f"{activite_nom} à {obj.ville.nom}. "
             f"Cette entreprise se distingue par son expertise et son professionnalisme."
         )
 
