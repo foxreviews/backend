@@ -205,28 +205,35 @@ class Command(BaseCommand):
         if options.get("commune"):
             commune = options["commune"]
             query_parts.append(f"codeCommuneEtablissement:{commune}")
-        # Sinon filtre par département
+        # Sinon filtre par département avec codes postaux multiples
         elif options.get("departement"):
             dept = options["departement"]
-            # L'API INSEE ne supporte pas les wildcards sur les codes
-            # Pour Paris (75), on utilise un code postal représentatif
-            if dept == "75":
-                # Paris : utiliser le code postal 75001 comme exemple
-                query_parts.append("codePostalEtablissement:75001")
+            # Générer plusieurs codes postaux pour couvrir le département
+            if dept == "75":  # Paris
+                # Paris : 75001 à 75020
+                codes_postaux = [f"codePostalEtablissement:750{str(i).zfill(2)}" for i in range(1, 21)]
+                query_parts.append(" OR ".join(codes_postaux))
+            elif dept == "13":  # Bouches-du-Rhône
+                # Marseille et environs
+                codes_postaux = [f"codePostalEtablissement:130{str(i).zfill(2)}" for i in range(1, 17)]
+                query_parts.append(" OR ".join(codes_postaux))
+            elif dept == "69":  # Rhône
+                # Lyon
+                codes_postaux = [f"codePostalEtablissement:690{str(i).zfill(2)}" for i in range(1, 10)]
+                query_parts.append(" OR ".join(codes_postaux))
             else:
-                # Pour les autres départements, utiliser le premier code postal
-                # Ex: 13 -> 13001 (Marseille), 69 -> 69001 (Lyon)
+                # Pour les autres départements, utiliser le code postal principal
                 query_parts.append(f"codePostalEtablissement:{dept}001")
 
-        # Filtre par NAF
+        # Filtre par NAF - Note: L'API INSEE a des limitations sur ce champ
+        # Pour un import par NAF, utilisez --query directement
         if options.get("naf"):
             naf = options["naf"]
-            # Ajouter * seulement si c'est une recherche partielle
-            # Un code NAF complet contient un point (ex: 62.01Z)
-            # Un code partiel n'en contient pas (ex: 62)
-            if not naf.endswith("*") and "." not in naf:
-                naf = f"{naf}*"
-            query_parts.append(f"activitePrincipaleEtablissement:{naf}")
+            # Retirer le point pour compatibilité API (62.01Z -> 6201Z)
+            naf_clean = naf.replace(".", "")
+            # Note: Les wildcards ne fonctionnent pas, utiliser code exact
+            if "*" not in naf_clean:
+                query_parts.append(f"activitePrincipaleEtablissement:{naf_clean}")
 
         # Filtre par tranche d'effectifs
         if options.get("tranche_effectifs"):
@@ -237,8 +244,8 @@ class Command(BaseCommand):
         # Par défaut, l'API retourne les établissements actifs
         # Si besoin de filtrer les fermés, utiliser --query directement
 
-        # L'API INSEE utilise des espaces OU virgules comme séparateur
-        # Utiliser des espaces pour plus de compatibilité
+        # L'API INSEE utilise des espaces pour séparer avec OR
+        # Si aucun filtre, retourner * pour tout récupérer
         return " ".join(query_parts) if query_parts else "*"
 
     def _import_from_api(self, options: dict[str, Any]):
