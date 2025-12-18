@@ -96,7 +96,8 @@ class AIRequestService:
             "type": avis_type,
             
             "entreprise": {
-                "id": prolocalisation.entreprise.id,
+                # Toujours sérialiser l'identifiant en chaîne pour JSON
+                "id": str(prolocalisation.entreprise.id),
                 "nom": entreprise_nom[:100],
                 "siren": prolocalisation.entreprise.siren or "",
                 "ville": ville_nom[:50],
