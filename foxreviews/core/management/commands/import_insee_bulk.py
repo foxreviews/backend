@@ -208,8 +208,15 @@ class Command(BaseCommand):
         # Sinon filtre par département
         elif options.get("departement"):
             dept = options["departement"]
-            # Le code commune commence par le département
-            query_parts.append(f"codeCommuneEtablissement:{dept}*")
+            # L'API INSEE ne supporte pas les wildcards sur les codes
+            # Pour Paris (75), on utilise un code postal représentatif
+            if dept == "75":
+                # Paris : utiliser le code postal 75001 comme exemple
+                query_parts.append("codePostalEtablissement:75001")
+            else:
+                # Pour les autres départements, utiliser le premier code postal
+                # Ex: 13 -> 13001 (Marseille), 69 -> 69001 (Lyon)
+                query_parts.append(f"codePostalEtablissement:{dept}001")
 
         # Filtre par NAF
         if options.get("naf"):
@@ -226,12 +233,13 @@ class Command(BaseCommand):
             tranche = options["tranche_effectifs"]
             query_parts.append(f"trancheEffectifsEtablissement:{tranche}")
 
-        etat = options.get("etat", "")
-        if etat != "all":
-            query_parts.append(f"etatAdministratifEtablissement")
+        # Note: Le filtre etatAdministratifEtablissement ne fonctionne pas correctement dans l'API INSEE
+        # Par défaut, l'API retourne les établissements actifs
+        # Si besoin de filtrer les fermés, utiliser --query directement
 
-        # L'API INSEE utilise des virgules comme séparateur de critères
-        return ",".join(query_parts)
+        # L'API INSEE utilise des espaces OU virgules comme séparateur
+        # Utiliser des espaces pour plus de compatibilité
+        return " ".join(query_parts) if query_parts else "*"
 
     def _import_from_api(self, options: dict[str, Any]):
         """Import depuis l'API INSEE."""
