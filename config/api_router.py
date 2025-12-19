@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework.routers import SimpleRouter
 
 from foxreviews.category.api.views import CategorieViewSet
+from foxreviews.core.viewsets_import import ImportViewSet
 from foxreviews.enterprise.api.views import EntrepriseViewSet
 from foxreviews.enterprise.api.views import ProLocalisationViewSet
 from foxreviews.location.api.views import VilleViewSet
@@ -24,6 +25,9 @@ router.register("entreprises", EntrepriseViewSet, basename="entreprise")
 router.register("pro-localisations", ProLocalisationViewSet, basename="prolocalisation")
 router.register("avis-decryptes", AvisDecrypteViewSet, basename="avisdecrypte")
 router.register("sponsorisations", SponsorisationViewSet, basename="sponsorisation")
+
+# Import management (admin only)
+router.register("imports", ImportViewSet, basename="import")
 
 
 app_name = "api"

@@ -299,3 +299,44 @@ def retry_failed_items(item_type: str = None, limit: int = 100):
     logger.info(f"Retry terminé: {stats['success']} succès, {stats['failed']} échecs")
     return stats
 
+
+@shared_task(name="refresh_materialized_views")
+def refresh_materialized_views():
+    """
+    Rafraîchit les vues matérialisées PostgreSQL.
+
+    Performance sur millions de données:
+    - Count() en temps réel: 2-5s par requête
+    - Vue matérialisée: 1-5ms (refresh 1x/jour)
+
+    Planification: Exécuter à 2h du matin (faible trafic)
+    SQL: REFRESH MATERIALIZED VIEW CONCURRENTLY ville_stats
+
+    CONCURRENTLY permet de ne pas bloquer les lectures pendant refresh.
+    """
+    from django.db import connection
+
+    logger.info("Début refresh vues matérialisées")
+
+    stats = {"ville_stats": None, "errors": []}
+
+    # Refresh ville_stats
+    try:
+        with connection.cursor() as cursor:
+            # CONCURRENTLY = pas de lock des lectures
+            cursor.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY ville_stats")
+            stats["ville_stats"] = "success"
+            logger.info("ville_stats refreshed")
+    except Exception as e:
+        logger.exception(f"Erreur refresh ville_stats: {e}")
+        stats["errors"].append(f"ville_stats: {e}")
+        stats["ville_stats"] = "error"
+
+    # TODO: Ajouter autres vues matérialisées si nécessaire
+    # - categorie_stats
+    # - sous_categorie_stats
+    # - enterprise_stats
+
+    logger.info(f"Refresh vues matérialisées terminé: {stats}")
+    return stats
+

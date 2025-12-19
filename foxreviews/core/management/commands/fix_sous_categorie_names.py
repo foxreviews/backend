@@ -98,10 +98,11 @@ class Command(BaseCommand):
                     f"   ⚠️  {sous_cat.nom} → Aucun libellé trouvé"
                 )
 
-        # 3. Appliquer les corrections
+        # 3. Appliquer les corrections avec bulk_update pour optimisation
         if not dry_run:
             self.stdout.write(f"\n📝 Application de {len(corrections)} corrections...")
 
+            sous_cats_to_update = []
             for item in corrections:
                 sous_cat = item["sous_cat"]
                 new_name = item["new_name"]
@@ -116,7 +117,15 @@ class Command(BaseCommand):
                 # Mettre à jour la description
                 sous_cat.description = f"NAF {item['naf_code']} : {new_name}"
                 
-                sous_cat.save()
+                sous_cats_to_update.append(sous_cat)
+            
+            # Bulk update pour meilleure performance
+            if sous_cats_to_update:
+                SousCategorie.objects.bulk_update(
+                    sous_cats_to_update,
+                    ["nom", "slug", "description"],
+                    batch_size=100,
+                )
 
             self.stdout.write("   ✅ Corrections appliquées!")
 

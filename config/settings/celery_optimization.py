@@ -85,4 +85,9 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'core.generate_missing_ai_reviews',
         'schedule': crontab(hour=4, minute=0),  # 4h du matin
     },
+    # 📊 Refresh vues matérialisées (stats optimisées pour millions de données)
+    'nightly-refresh-materialized-views': {
+        'task': 'refresh_materialized_views',
+        'schedule': crontab(hour=2, minute=0),  # 2h du matin (faible trafic)
+    },
 }
