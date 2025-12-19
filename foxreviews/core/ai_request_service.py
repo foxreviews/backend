@@ -4,6 +4,7 @@ Prépare les payloads JSON structurés et gère le déclenchement intelligent.
 """
 
 import hashlib
+import re
 import logging
 import time
 import uuid
@@ -303,13 +304,42 @@ class AIRequestService:
                 strict=True,
             )
             
+            # Fallback post-traitement si format/longueur invalide
             if not is_valid:
-                error_details = f"Validation échouée: {rejection_reason}"
-                logger.warning(
-                    f"❌ Avis rejeté pour {prolocalisation.entreprise.nom}: {rejection_reason}"
+                reason_lower = (rejection_reason or "").lower()
+                needs_sanitize = (
+                    ("format invalide" in reason_lower) or
+                    ("trop court" in reason_lower) or
+                    ("trop long" in reason_lower)
                 )
-                # Ne pas sauvegarder le contenu invalide
-                return False, None
+                if needs_sanitize:
+                    texte_sanitized = self._post_process_text(texte, prolocalisation, quality)
+                    if texte_sanitized:
+                        is_valid2, rejection_reason2 = AIContentValidator.validate_content(
+                            texte_sanitized,
+                            entreprise_siren=prolocalisation.entreprise.siren,
+                            strict=True,
+                        )
+                        if is_valid2:
+                            texte = texte_sanitized
+                        else:
+                            error_details = f"Validation échouée après correction: {rejection_reason2}"
+                            logger.warning(
+                                f"❌ Avis rejeté pour {prolocalisation.entreprise.nom}: {rejection_reason2}"
+                            )
+                            return False, None
+                    else:
+                        error_details = f"Validation échouée: {rejection_reason}"
+                        logger.warning(
+                            f"❌ Avis rejeté pour {prolocalisation.entreprise.nom}: {rejection_reason}"
+                        )
+                        return False, None
+                else:
+                    error_details = f"Validation échouée: {rejection_reason}"
+                    logger.warning(
+                        f"❌ Avis rejeté pour {prolocalisation.entreprise.nom}: {rejection_reason}"
+                    )
+                    return False, None
             
             # Logger metadata pour debug
             metadata = response.get("metadata", {})
@@ -435,3 +465,52 @@ class AIRequestService:
             return response.status_code == 200
         except:
             return False
+
+    def _post_process_text(self, texte: str, prolocalisation: ProLocalisation, quality: str) -> str | None:
+        """
+        Post-traitement pour respecter le format CDC (1 phrase journalistique 50-500 caractères).
+        - Nettoie HTML
+        - Conserve 1-2 phrases max, préférentiellement la première
+        - Assure majuscule initiale et ponctuation finale
+        - Ajuste longueur (tronque si trop long, enrichit sobrement si trop court)
+        """
+        if not texte or not isinstance(texte, str):
+            return None
+        t = texte.strip()
+        # Retirer tags HTML
+        t = re.sub(r"<[^>]+>", " ", t)
+        # Normaliser espaces
+        t = " ".join(t.split())
+        # Découper en phrases par ponctuation
+        sentences = re.split(r"(?<=[.!?])\s+", t)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        if not sentences:
+            return None
+        # Prendre la première phrase
+        s = sentences[0]
+        # Assurer ponctuation finale
+        if not s.endswith(('.', '!', '?')):
+            s = s + '.'
+        # Assurer majuscule initiale
+        s = s[0].upper() + s[1:] if s else s
+        # Tronquer si trop long
+        if len(s) > AIContentValidator.MAX_LENGTH:
+            s = s[:AIContentValidator.MAX_LENGTH - 1]
+            # couper au dernier espace et ajouter point
+            last_space = s.rfind(' ')
+            if last_space > 0:
+                s = s[:last_space] + '.'
+        # Enrichir si trop court avec faits sobres
+        if len(s) < AIContentValidator.MIN_LENGTH:
+            entreprise_nom = (prolocalisation.entreprise.nom or '').strip()
+            ville_nom = (prolocalisation.ville.nom or '').strip()
+            activite = (prolocalisation.sous_categorie.nom or '').strip()
+            addon = f" {entreprise_nom} à {ville_nom} offre des services de {activite} appréciés pour leur fiabilité et leur professionnalisme."
+            s = s.rstrip('. ')
+            s = s + '.' + addon
+            # Assurer ponctuation finale
+            if not s.endswith(('.', '!', '?')):
+                s = s + '.'
+        # Nettoyage final
+        s = " ".join(s.split())
+        return s
