@@ -11,6 +11,7 @@ Validation CDC :
 
 import logging
 import re
+from threading import Lock
 from typing import Dict, Tuple
 
 from foxreviews.core.structured_logging import structured_logger_ia, metrics_collector
