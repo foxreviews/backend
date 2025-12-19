@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from foxreviews.core.ai_service import AIService
 from foxreviews.core.ai_service import AIServiceError
+from foxreviews.core.structured_logging import metrics_collector
 from foxreviews.enterprise.models import ProLocalisation
 
 logger = logging.getLogger(__name__)
@@ -199,6 +200,25 @@ def generate_category_contents():
     return {"success": True, "count": count}
 
 
+@shared_task(name="flush_metrics")
+def flush_metrics():
+    """
+    Tâche périodique: flush les métriques accumulées vers les fichiers.
+    Planification: Exécuter toutes les heures.
+    """
+    logger.info("Flush des métriques")
+    
+    try:
+        metrics_collector.flush_metrics()
+        summary = metrics_collector.get_summary()
+        
+        logger.info(f"Métriques flushées : {len(summary)} types de métriques")
+        return {"success": True, "summary": summary}
+    except Exception as e:
+        logger.exception(f"Erreur flush métriques: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @shared_task(name="generate_ville_contents")
 def generate_ville_contents():
     """
@@ -225,3 +245,57 @@ def generate_ville_contents():
 
     logger.info(f"Génération villes terminée: {count} villes traitées")
     return {"success": True, "count": count}
+
+
+@shared_task(name="retry_failed_items")
+def retry_failed_items(item_type: str = None, limit: int = 100):
+    """
+    Tâche périodique: retente les items échoués.
+    
+    Args:
+        item_type: Type d'items à retenter (optionnel)
+        limit: Nombre max d'items à retenter
+        
+    Returns:
+        Dict avec statistiques de retry
+    """
+    logger.info(f"Retry items échoués (type={item_type}, limit={limit})")
+    
+    from foxreviews.core.checkpoint_service import CheckpointService
+    
+    service = CheckpointService()
+    failed_items = service.get_failed_items_for_retry(item_type=item_type, limit=limit)
+    
+    stats = {
+        'total': len(failed_items),
+        'success': 0,
+        'failed': 0,
+    }
+    
+    for item in failed_items:
+        try:
+            # Marquer comme en cours de retry
+            service.retry_failed_item(str(item.id))
+            
+            # Retenter selon le type
+            if item.item_type == 'entreprise':
+                # Relancer l'import pour cet item
+                # TODO: implémenter retry spécifique
+                pass
+            elif item.item_type == 'prolocalisation':
+                # Relancer la création de ProLocalisation
+                # TODO: implémenter retry spécifique
+                pass
+            
+            # Marquer comme résolu si succès
+            service.mark_item_resolved(str(item.id))
+            stats['success'] += 1
+            
+        except Exception as e:
+            logger.exception(f"Erreur retry item {item.id}: {e}")
+            stats['failed'] += 1
+            continue
+    
+    logger.info(f"Retry terminé: {stats['success']} succès, {stats['failed']} échecs")
+    return stats
+

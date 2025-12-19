@@ -343,6 +343,94 @@ CELERY_WORKER_SEND_TASK_EVENTS = True
 CELERY_TASK_SEND_SENT_EVENT = True
 # https://docs.celeryq.dev/en/stable/userguide/configuration.html#worker-hijack-root-logger
 CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+
+# Celery Beat Schedule - Configuration CDC
+# ------------------------------------------------------------------------------
+# Planification automatique des tâches périodiques pour le test CDC
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    # Import quotidien de 35 000 entreprises INSEE (2h du matin)
+    'schedule-daily-insee-import': {
+        'task': 'schedule_daily_insee_import',
+        'schedule': crontab(hour=2, minute=0),
+        'options': {
+            'queue': 'default',
+            'priority': 10,
+        },
+    },
+    
+    # Régénération nocturne des avis IA avec rotation (2h30 du matin)
+    'regenerate-ai-reviews-nightly': {
+        'task': 'core.regenerate_ai_reviews_nightly',
+        'schedule': crontab(hour=2, minute=30),
+        'options': {
+            'queue': 'default',
+            'priority': 8,
+        },
+    },
+    
+    # Régénération PREMIUM sponsorisés (1h du matin)
+    'regenerate-sponsored-premium': {
+        'task': 'core.regenerate_sponsored_premium',
+        'schedule': crontab(hour=1, minute=0),
+        'options': {
+            'queue': 'default',
+            'priority': 9,
+        },
+    },
+    
+    # Génération avis manquants (4h du matin)
+    'generate-missing-ai-reviews': {
+        'task': 'core.generate_missing_ai_reviews',
+        'schedule': crontab(hour=4, minute=0),
+        'options': {
+            'queue': 'default',
+            'priority': 7,
+        },
+    },
+    
+    # Désactivation sponsorships expirés (tous les jours à 1h du matin)
+    'deactivate-expired-sponsorships': {
+        'task': 'deactivate_expired_sponsorships',
+        'schedule': crontab(hour=1, minute=0),
+        'options': {
+            'queue': 'default',
+            'priority': 6,
+        },
+    },
+    
+    # Régénération mensuelle des avis (1er du mois à 2h)
+    'regenerate-monthly-reviews': {
+        'task': 'regenerate_monthly_reviews',
+        'schedule': crontab(day_of_month=1, hour=2, minute=0),
+        'options': {
+            'queue': 'default',
+            'priority': 5,
+        },
+    },
+    
+    # Régénération semestrielle du contenu long (1er janvier et 1er juillet à 3h)
+    'regenerate-biannual-content': {
+        'task': 'regenerate_biannual_content',
+        'schedule': crontab(month_of_year='1,7', day_of_month=1, hour=3, minute=0),
+        'options': {
+            'queue': 'default',
+            'priority': 4,
+        },
+    },
+    
+    # Flush des métriques (toutes les heures)
+    'flush-metrics': {
+        'task': 'flush_metrics',
+        'schedule': crontab(minute=0),  # Toutes les heures
+        'options': {
+            'queue': 'default',
+            'priority': 3,
+        },
+    },
+}
+
 # django-allauth
 # ------------------------------------------------------------------------------
 ACCOUNT_ALLOW_REGISTRATION = env.bool("DJANGO_ACCOUNT_ALLOW_REGISTRATION", True)

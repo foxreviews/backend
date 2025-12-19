@@ -9,6 +9,7 @@ Traitement asynchrone de 35 000 entreprises/jour avec:
 """
 
 import logging
+import time
 from typing import Any
 
 from celery import chord
@@ -20,6 +21,7 @@ from django.utils import timezone
 from foxreviews.core.insee_service import InseeAPIError
 from foxreviews.core.insee_service import InseeRateLimitError
 from foxreviews.core.insee_service import InseeService
+from foxreviews.core.structured_logging import structured_logger_import, metrics_collector
 from foxreviews.enterprise.models import Entreprise
 from foxreviews.enterprise.models import ProLocalisation
 from foxreviews.location.models import Ville
@@ -53,6 +55,7 @@ def import_batch_insee(
     """
     insee_service = InseeService()
     stats = {'created': 0, 'updated': 0, 'errors': 0}
+    start_time = time.time()
     
     try:
         # Appel API INSEE avec pagination
@@ -103,9 +106,34 @@ def import_batch_insee(
                     Entreprise.objects.filter(id=ent_id).update(**data)
                 stats['updated'] = len(entreprises_to_update)
         
+        duration = time.time() - start_time
+        
         logger.info(
             f"Batch INSEE importé: {stats['created']} créées, "
             f"{stats['updated']} mises à jour"
+        )
+        
+        # Logging structuré
+        structured_logger_import.log_import_insee(
+            operation='import_batch',
+            count=stats['created'] + stats['updated'],
+            duration=duration,
+            batch_size=batch_size,
+            offset=offset,
+            success=True,
+            errors=stats['errors'],
+        )
+        
+        # Métriques
+        metrics_collector.record_metric(
+            'import_insee_batch_count',
+            stats['created'] + stats['updated'],
+            tags={'batch_size': str(batch_size)}
+        )
+        metrics_collector.record_metric(
+            'import_insee_duration',
+            duration,
+            tags={'batch_size': str(batch_size)}
         )
         
         # Déclencher création ProLocalisation en async
@@ -116,16 +144,44 @@ def import_batch_insee(
         return stats
         
     except InseeRateLimitError as exc:
+        duration = time.time() - start_time
         logger.warning(f"Quota INSEE atteint, retry dans 5 min: {exc}")
+        
+        structured_logger_import.log_error(
+            operation='import_batch_insee',
+            error_type='RateLimitError',
+            error_message=str(exc),
+            context={'batch_size': batch_size, 'offset': offset}
+        )
         raise self.retry(exc=exc, countdown=300)
         
     except InseeAPIError as exc:
+        duration = time.time() - start_time
         logger.error(f"Erreur API INSEE: {exc}")
         stats['errors'] += 1
+        
+        structured_logger_import.log_import_insee(
+            operation='import_batch',
+            count=0,
+            duration=duration,
+            batch_size=batch_size,
+            offset=offset,
+            success=False,
+            errors=1,
+            error_details=str(exc),
+        )
         return stats
         
     except Exception as exc:
+        duration = time.time() - start_time
         logger.exception(f"Erreur inattendue import INSEE: {exc}")
+        
+        structured_logger_import.log_error(
+            operation='import_batch_insee',
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            context={'batch_size': batch_size, 'offset': offset}
+        )
         raise self.retry(exc=exc)
 
 
@@ -215,7 +271,8 @@ def schedule_daily_insee_import() -> dict[str, Any]:
     """
     Planifie l'import quotidien de 35k entreprises.
     
-    Divise le travail en batches parallèles pour optimiser le temps.
+    Divise le travail en batches parallèles avec rate limiting intelligent.
+    Optimisé pour respecter 100 req/min INSEE API.
     """
     logger.info("Démarrage import quotidien INSEE (35k entreprises)")
     
@@ -223,23 +280,25 @@ def schedule_daily_insee_import() -> dict[str, Any]:
     batch_size = 100
     num_batches = target // batch_size  # 350 batches
     
-    # Créer les tâches en parallèle (groupées par chunks)
-    # Pour éviter de surcharger, faire 10 batches à la fois
-    chunk_size = 10
+    # Rate limit: 100 req/min = 1.66 req/sec
+    # On étale les 350 batches sur 6h (21600 sec) : 1 batch/62 sec
+    # Cela respecte le rate limit de 100/min (< 1/sec)
+    countdown_interval = 62  # secondes entre chaque batch
     
-    for i in range(0, num_batches, chunk_size):
-        # Créer un groupe de tâches parallèles
-        tasks = group(
-            import_batch_insee.s(
-                query="etatAdministratifEtablissement:A",
-                batch_size=batch_size,
-                offset=j * batch_size,
-            )
-            for j in range(i, min(i + chunk_size, num_batches))
-        )
+    # Créer toutes les tâches avec countdown progressif
+    for i in range(num_batches):
+        offset = i * batch_size
+        countdown = i * countdown_interval  # Délai progressif
         
-        # Exécuter le groupe
-        tasks.apply_async()
+        # Planifier avec countdown pour étaler dans le temps
+        import_batch_insee.apply_async(
+            kwargs={
+                'query': "etatAdministratifEtablissement:A",
+                'batch_size': batch_size,
+                'offset': offset,
+            },
+            countdown=countdown,
+        )
     
     logger.info(f"{num_batches} batches planifiés pour import")
     
@@ -280,6 +339,15 @@ def _extract_entreprise_data(etablissement: dict) -> dict[str, Any]:
     libelle_voie = adresse.get('libelleVoieEtablissement', '')
     adresse_complete = f"{numero} {type_voie} {libelle_voie}".strip()
     
+    # NAF code et libellé (IMPORTANT: prendre le bon champ)
+    naf_code = periode_actuelle.get('activitePrincipaleEtablissement', '')
+    # Le libellé peut venir de uniteLegale ou periode
+    naf_libelle = (
+        periode_actuelle.get('activitePrincipaleLibelleEtablissement') or
+        unite_legale.get('activitePrincipaleLibelleUniteLegale') or
+        ''
+    )
+    
     return {
         'siren': etablissement.get('siren'),
         'siret': etablissement.get('siret'),
@@ -288,7 +356,7 @@ def _extract_entreprise_data(etablissement: dict) -> dict[str, Any]:
         'adresse': adresse_complete or "Adresse non renseignée",
         'code_postal': adresse.get('codePostalEtablissement', ''),
         'ville_nom': adresse.get('libelleCommuneEtablissement', ''),
-        'naf_code': periode_actuelle.get('activitePrincipaleEtablissement', ''),
-        'naf_libelle': periode_actuelle.get('activitePrincipaleLibelleEtablissement', ''),
+        'naf_code': naf_code,
+        'naf_libelle': naf_libelle,
         'is_active': True,
     }

@@ -5,6 +5,7 @@ Prépare les payloads JSON structurés et gère le déclenchement intelligent.
 
 import hashlib
 import logging
+import time
 import uuid
 from datetime import timedelta
 
@@ -12,6 +13,8 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 
+from foxreviews.core.structured_logging import structured_logger_ia, metrics_collector
+from foxreviews.core.ai_content_validator import AIContentValidator
 from foxreviews.enterprise.models import ProLocalisation
 
 logger = logging.getLogger(__name__)
@@ -34,8 +37,9 @@ class AIRequestService:
         
         Critères de déclenchement:
         1. Avis vide (nouveau)
-        2. Avis expiré (> 3 mois)
+        2. Avis de mauvaise qualité (contenu invalide)
         3. Jamais généré (date_derniere_generation_ia = None)
+        4. Avis expiré (> 3 mois)
         
         Returns:
             (bool, str): (doit_regenerer, raison)
@@ -44,16 +48,85 @@ class AIRequestService:
         if not prolocalisation.texte_long_entreprise:
             return True, "avis_vide"
         
-        # Critère 2 & 3: Jamais généré ou expiré
+        # Critère 2: Avis de mauvaise qualité
+        if self._is_low_quality_content(prolocalisation.texte_long_entreprise):
+            return True, "avis_mauvaise_qualite"
+        
+        # Critère 3: Jamais généré
         if not prolocalisation.date_derniere_generation_ia:
             return True, "jamais_genere"
         
-        # Calcul expiration
+        # Critère 4: Avis expiré (> 3 mois)
         cutoff_date = timezone.now() - timedelta(days=self.AVIS_EXPIRATION_DAYS)
         if prolocalisation.date_derniere_generation_ia < cutoff_date:
             return True, "avis_expire"
         
         return False, "avis_valide"
+    
+    def _is_low_quality_content(self, texte: str) -> bool:
+        """
+        Détecte si le contenu est de mauvaise qualité et doit être régénéré.
+        
+        Critères de mauvaise qualité:
+        - Contient "Aucune information disponible"
+        - Contient "Aucune donnée"
+        - Contient "Information non disponible"
+        - Texte trop court (< 50 caractères)
+        - Contient du JSON brut (erreur de génération)
+        - Contient des placeholders comme "TODO", "N/A répété"
+        
+        Args:
+            texte: Contenu à vérifier
+        
+        Returns:
+            bool: True si le contenu est de mauvaise qualité
+        """
+        if not texte or not isinstance(texte, str):
+            return True
+        
+        texte_lower = texte.lower().strip()
+        
+        bad_phrases = [
+            "aucune information disponible",
+            "aucune information n'est disponible",
+            "aucune donnée disponible",
+            "aucune donnée n'est disponible",
+            "information non disponible",
+            "pas d'information disponible",
+            "données insuffisantes",
+            "informations insuffisantes",
+            "aucun avis disponible",
+            "aucune évaluation disponible",
+        ]
+        
+        for phrase in bad_phrases:
+            if phrase in texte_lower:
+                logger.warning(f"Contenu de mauvaise qualité détecté: '{phrase}'")
+                return True
+        
+        # Contenu trop court
+        if len(texte_lower) < 50:
+            logger.warning(f"Contenu trop court: {len(texte_lower)} caractères")
+            return True
+        
+        # Détection de JSON brut (erreur de génération)
+        if texte_lower.startswith("{") and texte_lower.endswith("}"):
+            logger.warning("Contenu JSON brut détecté (erreur de génération)")
+            return True
+        
+        # Placeholders ou contenu temporaire
+        placeholders = ["todo", "à compléter", "lorem ipsum", "[placeholder]"]
+        for placeholder in placeholders:
+            if placeholder in texte_lower:
+                logger.warning(f"Placeholder détecté: '{placeholder}'")
+                return True
+        
+        # "N/A" répété (signe d'échec)
+        if texte_lower.count("n/a") > 2:
+            logger.warning("Trop de 'N/A' détectés")
+            return True
+        
+        return False
     
     def prepare_payload(
         self,
@@ -181,61 +254,131 @@ class AIRequestService:
         Returns:
             (bool, str | None): (succès, texte_généré)
         """
-        # Vérifier si génération nécessaire
-        if not force:
-            should_gen, reason = self.should_regenerate(prolocalisation)
-            if not should_gen:
-                logger.info(
-                    f"Génération non nécessaire pour {prolocalisation.id}: {reason}"
+        start_time = time.time()
+        success = False
+        error_details = None
+        texte = None
+        
+        try:
+            # Vérifier si génération nécessaire
+            if not force:
+                should_gen, reason = self.should_regenerate(prolocalisation)
+                if not should_gen:
+                    logger.info(
+                        f"Génération non nécessaire pour {prolocalisation.id}: {reason}"
+                    )
+                    return False, None
+            
+            # Préparer payload
+            payload = self.prepare_payload(prolocalisation, quality=quality)
+            
+            # Envoyer requête
+            response = self.send_request(payload)
+            if not response:
+                error_details = "Aucune réponse du service IA"
+                return False, None
+            
+            # Vérifier status
+            if response.get("status") != "success":
+                error_details = f"Status: {response.get('status')}"
+                logger.warning(
+                    f"Génération échouée pour request_id={payload['request_id']}: "
+                    f"{response.get('status')}"
                 )
                 return False, None
-        
-        # Préparer payload
-        payload = self.prepare_payload(prolocalisation, quality=quality)
-        
-        # Envoyer requête
-        response = self.send_request(payload)
-        if not response:
-            return False, None
-        
-        # Vérifier status
-        if response.get("status") != "success":
-            logger.warning(
-                f"Génération échouée pour request_id={payload['request_id']}: "
-                f"{response.get('status')}"
+            
+            # Extraire texte généré selon API spec (avis.texte)
+            avis_data = response.get("avis", {})
+            texte = avis_data.get("texte", "")
+            
+            if not texte:
+                error_details = "Texte vide reçu"
+                logger.warning(f"Texte vide reçu pour request_id={payload['request_id']}")
+                return False, None
+            
+            # VALIDATION STRICTE DU CONTENU (CDC)
+            is_valid, rejection_reason = AIContentValidator.validate_content(
+                texte,
+                entreprise_siren=prolocalisation.entreprise.siren,
+                strict=True,
             )
-            return False, None
-        
-        # Extraire texte généré selon API spec (avis.texte)
-        avis_data = response.get("avis", {})
-        texte = avis_data.get("texte", "")
-        
-        if not texte:
-            logger.warning(f"Texte vide reçu pour request_id={payload['request_id']}")
-            return False, None
-        
-        # Logger metadata pour debug
-        metadata = response.get("metadata", {})
-        logger.info(
-            f"Avis généré: quality_score={metadata.get('quality_score', 'N/A')}, "
-            f"source_mode={metadata.get('source_mode', 'N/A')}, "
-            f"validation_passed={avis_data.get('validation_passed', 'N/A')}"
-        )
-        
-        # Sauvegarder
-        prolocalisation.texte_long_entreprise = texte
-        prolocalisation.date_derniere_generation_ia = timezone.now()
-        prolocalisation.save(update_fields=[
-            "texte_long_entreprise",
-            "date_derniere_generation_ia",
-        ])
-        
-        logger.info(
-            f"✅ Avis généré pour {prolocalisation.entreprise.nom} "
-            f"(quality={quality}, request_id={payload['request_id']})"
-        )
-        
-        return True, texte
+            
+            if not is_valid:
+                error_details = f"Validation échouée: {rejection_reason}"
+                logger.warning(
+                    f"❌ Avis rejeté pour {prolocalisation.entreprise.nom}: {rejection_reason}"
+                )
+                # Ne pas sauvegarder le contenu invalide
+                return False, None
+            
+            # Logger metadata pour debug
+            metadata = response.get("metadata", {})
+            confidence_score = metadata.get('quality_score', 0.0)
+            
+            logger.info(
+                f"Avis généré: quality_score={confidence_score}, "
+                f"source_mode={metadata.get('source_mode', 'N/A')}, "
+                f"validation_passed={avis_data.get('validation_passed', 'N/A')}"
+            )
+            
+            # Sauvegarder
+            prolocalisation.texte_long_entreprise = texte
+            prolocalisation.date_derniere_generation_ia = timezone.now()
+            prolocalisation.save(update_fields=[
+                "texte_long_entreprise",
+                "date_derniere_generation_ia",
+            ])
+            
+            logger.info(
+                f"✅ Avis généré et validé pour {prolocalisation.entreprise.nom} "
+                f"(quality={quality}, request_id={payload['request_id']})"
+            )
+            
+            success = True
+            
+            # Logging structuré
+            duration = time.time() - start_time
+            structured_logger_ia.log_generation_ia(
+                prolocalisation_id=str(prolocalisation.id),
+                entreprise_siren=prolocalisation.entreprise.siren,
+                operation='generate_avis',
+                duration=duration,
+                success=True,
+                quality=quality,
+                content_length=len(texte),
+                confidence_score=confidence_score,
+            )
+            
+            # Métriques
+            metrics_collector.record_metric(
+                'ia_generation_duration',
+                duration,
+                tags={'quality': quality}
+            )
+            metrics_collector.record_metric(
+                'ia_content_length',
+                len(texte),
+                tags={'quality': quality}
+            )
+            
+            return True, texte
+            
+        except Exception as e:
+            error_details = str(e)
+            duration = time.time() - start_time
+            
+            # Logging structuré de l'erreur
+            structured_logger_ia.log_generation_ia(
+                prolocalisation_id=str(prolocalisation.id),
+                entreprise_siren=prolocalisation.entreprise.siren,
+                operation='generate_avis',
+                duration=duration,
+                success=False,
+                quality=quality,
+                error_details=error_details,
+            )
+            
+            raise
     
     # --- Méthodes utilitaires ---
     
