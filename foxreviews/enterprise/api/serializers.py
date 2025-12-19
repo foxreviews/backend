@@ -180,6 +180,33 @@ class ProLocalisationDetailSerializer(ProLocalisationListSerializer):
 
     sous_categorie = SousCategorieDetailSerializer(read_only=True)
     ville = VilleSerializer(read_only=True)
+    avis_redaction = serializers.SerializerMethodField()
 
     class Meta(ProLocalisationListSerializer.Meta):
-        fields = [*ProLocalisationListSerializer.Meta.fields, "zone_description", "updated_at"]
+        fields = [*ProLocalisationListSerializer.Meta.fields, "zone_description", "avis_redaction", "updated_at"]
+
+    def get_avis_redaction(self, obj):
+        """
+        Retourne l'avis rédactionnel (généré par IA).
+        Si le champ texte_long_entreprise existe, on l'utilise.
+        Sinon, on génère un avis par défaut.
+        """
+        if obj.texte_long_entreprise:
+            # Extraire les 2 premières phrases
+            sentences = obj.texte_long_entreprise.split(". ")
+            return ". ".join(sentences[:2]) + "." if len(sentences) >= 2 else sentences[0]
+
+        # Déterminer le nom de l'activité (éviter les codes NAF génériques)
+        activite_nom = obj.sous_categorie.nom
+        
+        # Si c'est un code générique "Activité XX.XXZ", utiliser la catégorie
+        if activite_nom.startswith("Activité ") and activite_nom[-1].isalpha():
+            # Format: "Activité XX.XXZ" -> utiliser la catégorie parente
+            activite_nom = obj.sous_categorie.categorie.nom.lower()
+        
+        # Avis par défaut si pas encore généré
+        return (
+            f"{obj.entreprise.nom} est une entreprise spécialisée en "
+            f"{activite_nom} à {obj.ville.nom}. "
+            f"Cette entreprise se distingue par son expertise et son professionnalisme."
+        )
