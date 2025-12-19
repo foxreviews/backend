@@ -11,6 +11,8 @@ Note: Les modèles métier ont maintenant leurs propres fichiers admin dans leur
 """
 
 from django.contrib import admin
+from django.urls import path
+from django.template.response import TemplateResponse
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
@@ -352,6 +354,58 @@ class ImportLogAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         """Les admins peuvent voir les imports."""
         return request.user.is_staff
+
+    # ==================== DASHBOARD ====================
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "dashboard/",
+                self.admin_site.admin_view(self.dashboard_view),
+                name="core_dashboard",
+            )
+        ]
+        return custom + urls
+
+    def dashboard_view(self, request):
+        from foxreviews.location.models import Ville
+        from foxreviews.category.models import Categorie
+        from foxreviews.subcategory.models import SousCategorie
+        from foxreviews.enterprise.models import Entreprise, ProLocalisation
+
+        # Import stats
+        imports_total = ImportLog.objects.count()
+        from django.db.models import Count as DCount
+        imports_by_status = ImportLog.objects.values("status").annotate(nb=DCount("status"))
+        status_map = {i["status"]: i["nb"] for i in imports_by_status}
+
+        # Top categories by nb sous-categories
+        top_categories = list(
+            Categorie.objects.annotate(nb=DCount("sous_categories")).values("nom", "nb").order_by("-nb")[:10]
+        )
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title="Tableau de bord",
+            stats={
+                "nb_villes": Ville.objects.count(),
+                "nb_categories": Categorie.objects.count(),
+                "nb_sous_categories": SousCategorie.objects.count(),
+                "nb_entreprises": Entreprise.objects.count(),
+                "nb_pro_localisations": ProLocalisation.objects.count(),
+                "imports": {
+                    "total": imports_total,
+                    "pending": status_map.get("PENDING", 0),
+                    "processing": status_map.get("PROCESSING", 0),
+                    "success": status_map.get("SUCCESS", 0),
+                    "partial": status_map.get("PARTIAL", 0),
+                    "error": status_map.get("ERROR", 0),
+                },
+                "top_categories": top_categories,
+            },
+        )
+
+        return TemplateResponse(request, "admin/dashboard.html", context)
 
     def has_delete_permission(self, request, obj=None):
         """Les admins peuvent supprimer les anciens imports."""

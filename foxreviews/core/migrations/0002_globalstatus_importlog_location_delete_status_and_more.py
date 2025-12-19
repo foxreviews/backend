@@ -156,8 +156,18 @@ class Migration(migrations.Migration):
                 ("longitude", models.DecimalField(decimal_places=6, max_digits=9)),
             ],
         ),
-        migrations.DeleteModel(
-            name="Status",
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunSQL(
+                    sql="DROP TABLE IF EXISTS core_status CASCADE;",
+                    reverse_sql=migrations.RunSQL.noop,
+                )
+            ],
+            state_operations=[
+                migrations.DeleteModel(
+                    name="Status",
+                )
+            ],
         ),
         migrations.AddIndex(
             model_name="importlog",

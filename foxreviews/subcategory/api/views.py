@@ -63,6 +63,10 @@ class SousCategorieViewSet(CRUDViewSet):
         """
         query = request.query_params.get("q", "").strip().lower()
         categorie_id = request.query_params.get("categorie", "").strip()
+        try:
+            limit = int(request.query_params.get("limit", 10))
+        except Exception:
+            limit = 10
 
         if len(query) < 2:
             return Response(
@@ -86,9 +90,10 @@ class SousCategorieViewSet(CRUDViewSet):
         if categorie_id:
             sous_cats = sous_cats.filter(categorie_id=categorie_id)
 
-        sous_cats = sous_cats.only(
-            "id", "nom", "slug", "categorie__nom"
-        ).order_by("ordre", "nom")[:10]
+        sous_cats = (
+            sous_cats.only("id", "nom", "slug", "categorie__nom")
+            .order_by("ordre", "nom")[: max(1, min(limit, 50))]
+        )
 
         results = [
             {

@@ -62,6 +62,13 @@ class VilleViewSet(CRUDViewSet):
         Rate limit: 30 requêtes/minute.
         """
         query = request.query_params.get("q", "").strip().lower()
+        code_postal = request.query_params.get("code_postal", "").strip()
+        region = request.query_params.get("region", "").strip()
+        departement = request.query_params.get("departement", "").strip()
+        try:
+            limit = int(request.query_params.get("limit", 10))
+        except Exception:
+            limit = 10
 
         if len(query) < 2:
             return Response(
@@ -69,7 +76,7 @@ class VilleViewSet(CRUDViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        cache_key = f"ville_autocomplete:{query}"
+        cache_key = f"ville_autocomplete:{query}:{code_postal}:{region}:{departement}:{limit}"
 
         # L1: In-memory cache (ultra-rapide, 100ms TTL)
         try:
@@ -91,22 +98,31 @@ class VilleViewSet(CRUDViewSet):
             return Response(cached_results)
 
         # L3: Database query
-        villes = (
-            Ville.objects
-            .filter(
-                Q(nom__icontains=query)
-                | Q(code_postal_principal__startswith=query)
+        base_qs = Ville.objects.all()
+        if query:
+            base_qs = base_qs.filter(
+                Q(nom__icontains=query) | Q(code_postal_principal__startswith=query)
             )
-            .only("id", "nom", "code_postal_principal", "departement")
-            .order_by("nom")[:10]
+        if code_postal:
+            base_qs = base_qs.filter(code_postal_principal=code_postal)
+        if region:
+            base_qs = base_qs.filter(region__iexact=region)
+        if departement:
+            base_qs = base_qs.filter(departement__iexact=departement)
+
+        villes = (
+            base_qs
+            .only("id", "nom", "code_postal_principal", "departement", "slug")
+            .order_by("nom")[: max(1, min(limit, 50))]
         )
 
         results = [
             {
                 "id": str(ville.id),
                 "nom": ville.nom,
-                "code_postal": ville.code_postal_principal,
+                "code_postal_principal": ville.code_postal_principal,
                 "departement": ville.departement,
+                "slug": getattr(ville, "slug", None),
                 "label": f"{ville.nom} ({ville.code_postal_principal})",
             }
             for ville in villes
@@ -131,14 +147,29 @@ class VilleViewSet(CRUDViewSet):
         Utile pour les imports CSV qui référencent une ville par son nom.
         Rate limit: 30 requêtes/minute.
         """
+        # Nouveau: lookup par id ou slug
+        vid = request.query_params.get("id", "").strip()
+        slug = request.query_params.get("slug", "").strip()
+        # Compat: anciens paramètres
         nom = request.query_params.get("nom", "").strip()
         code_postal = request.query_params.get("code_postal", "").strip()
 
+        # Priorité: id > slug > nom/code_postal
+        if vid:
+            try:
+                ville = Ville.objects.get(pk=vid)
+                serializer = self.get_serializer(ville)
+                return Response(serializer.data)
+            except Ville.DoesNotExist:
+                return Response({"error": "Ville introuvable"}, status=status.HTTP_404_NOT_FOUND)
+        if slug:
+            ville = Ville.objects.filter(slug=slug).first()
+            if ville:
+                serializer = self.get_serializer(ville)
+                return Response(serializer.data)
+            return Response({"error": "Ville introuvable"}, status=status.HTTP_404_NOT_FOUND)
         if not nom:
-            return Response(
-                {"error": "Paramètre 'nom' requis"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"error": "Paramètre manquant"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Recherche optimisée avec index
         query = Ville.objects.filter(nom__iexact=nom)
@@ -177,7 +208,7 @@ class VilleViewSet(CRUDViewSet):
                     "total_departements": stats_obj.total_departements,
                     "total_regions": stats_obj.total_regions,
                     "population_totale": stats_obj.population_totale,
-                    "population_moyenne": round(stats_obj.population_moyenne, 0),
+                    "population_moyenne": stats_obj.population_moyenne,
                 })
         except Exception:
             # Fallback si vue pas encore créée

@@ -67,6 +67,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Organiques uniquement (STANDARD)",
         )
+        parser.add_argument(
+            "--only-placeholder",
+            action="store_true",
+            help="Traite uniquement les contenus affichant 'Aucune information'",
+        )
 
     def handle(self, *args, **options):
         batch_size = options["batch_size"]
@@ -75,6 +80,7 @@ class Command(BaseCommand):
         regenerate_old = options["regenerate_old"]
         sponsored_only = options["sponsored_only"]
         organic_only = options["organic_only"]
+        only_placeholder = options["only_placeholder"]
         
         self.stdout.write(
             self.style.SUCCESS("\n🤖 GÉNÉRATION AVIS IA (DÉCLENCHEMENT INTELLIGENT)\n" + "=" * 80),
@@ -118,6 +124,11 @@ class Command(BaseCommand):
         elif organic_only:
             queryset = queryset.filter(is_sponsored=False)
             self.stdout.write("📊 Mode: ORGANIQUES (STANDARD)\n")
+        
+        # Placeholder uniquement: cible les contenus montrant 'aucune information'
+        if only_placeholder:
+            queryset = queryset.filter(texte_long_entreprise__icontains="aucune information")
+            self.stdout.write("🧹 Mode: PLACEHOLDER SEULEMENT ('aucune information')\n")
         
         # Déclenchement intelligent via should_regenerate()
         if not force:
@@ -174,6 +185,12 @@ class Command(BaseCommand):
                     # Vérifier si régénération nécessaire (sauf si force)
                     if not force:
                         should_regen, reason = ai_service.should_regenerate(proloc)
+                        # Si on cible uniquement les placeholders, ignorer les autres raisons
+                        if only_placeholder and reason != "avis_mauvaise_qualite":
+                            self.stdout.write(
+                                f"   [{idx}/{total}] {proloc.entreprise.nom[:30]} - Ignoré (non-placeholder: {reason})",
+                            )
+                            continue
                         if not should_regen:
                             self.stdout.write(
                                 f"   [{idx}/{total}] {proloc.entreprise.nom[:30]} - Ignoré ({reason})",

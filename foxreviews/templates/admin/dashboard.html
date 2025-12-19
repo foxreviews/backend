@@ -1,0 +1,68 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}Tableau de bord{% endblock %}
+
+{% block content %}
+<h1>Tableau de bord FOX-Reviews</h1>
+
+<style>
+.dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card { border: 1px solid #ddd; border-radius: 6px; padding: 12px; background: #fff; }
+.card h3 { margin: 0 0 8px; font-size: 16px; }
+.stat { font-size: 24px; font-weight: 600; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.badge-success { background: #198754; color: #fff; }
+.badge-warning { background: #ffc107; color: #000; }
+.badge-danger { background: #dc3545; color: #fff; }
+.badge-info { background: #0d6efd; color: #fff; }
+</style>
+
+<div class="dashboard-grid">
+  <div class="card">
+    <h3>Villes</h3>
+    <div class="stat">{{ stats.nb_villes }}</div>
+  </div>
+  <div class="card">
+    <h3>Catégories</h3>
+    <div class="stat">{{ stats.nb_categories }}</div>
+  </div>
+  <div class="card">
+    <h3>Sous-catégories</h3>
+    <div class="stat">{{ stats.nb_sous_categories }}</div>
+  </div>
+  <div class="card">
+    <h3>Entreprises</h3>
+    <div class="stat">{{ stats.nb_entreprises }}</div>
+  </div>
+  <div class="card">
+    <h3>ProLocalisations</h3>
+    <div class="stat">{{ stats.nb_pro_localisations }}</div>
+  </div>
+  <div class="card">
+    <h3>Imports</h3>
+    <div>Totaux: <span class="stat">{{ stats.imports.total }}</span></div>
+    <div>
+      <span class="badge badge-info">En attente: {{ stats.imports.pending }}</span>
+      <span class="badge badge-info">En cours: {{ stats.imports.processing }}</span>
+    </div>
+    <div>
+      <span class="badge badge-success">Succès: {{ stats.imports.success }}</span>
+      <span class="badge badge-warning">Partiel: {{ stats.imports.partial }}</span>
+      <span class="badge badge-danger">Erreurs: {{ stats.imports.error }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h3>Top catégories (par nb de sous-catégories)</h3>
+  <ul>
+    {% for item in stats.top_categories %}
+      <li>{{ item.nom }} — {{ item.nb }}</li>
+    {% empty %}
+      <li>Aucune donnée</li>
+    {% endfor %}
+  </ul>
+</div>
+
+{% endblock %}

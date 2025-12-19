@@ -5,5 +5,29 @@ set -o pipefail
 set -o nounset
 
 
-python manage.py migrate
+# Ensure dependencies are installed into /app/.venv (mounted volume)
+uv sync --frozen
+
+# Run migrations with retry/backoff to handle DB readiness/locks
+max_attempts=10
+delay=2
+attempt=1
+while true; do
+	if python manage.py migrate --noinput; then
+		break
+	fi
+	if [ "$attempt" -ge "$max_attempts" ]; then
+		echo "Migrations failed after $attempt attempts. Exiting." >&2
+		exit 1
+	fi
+	echo "Migrations failed (attempt $attempt/$max_attempts). Retrying in ${delay}s..." >&2
+	sleep "$delay"
+	attempt=$((attempt + 1))
+	# exponential backoff, capped at 30s
+	if [ "$delay" -lt 30 ]; then
+		delay=$((delay * 2))
+		if [ "$delay" -gt 30 ]; then delay=30; fi
+	fi
+done
+
 exec uvicorn config.asgi:application --host 0.0.0.0 --reload --reload-include '*.html'

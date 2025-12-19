@@ -146,26 +146,23 @@ SELECT pg_size_pretty(pg_relation_size('location_ville_nom_trgm_idx'));
 
 ## 🎯 Pour MILLIONS de données (5M+)
 
-### Indexes INCLUDE (Covering) - PostgreSQL 11+
+### Indexes Haute Volumétrie (PostgreSQL 11+)
 ```sql
--- Évite table access (heap fetch) en incluant toutes les colonnes nécessaires
--- Réduction 50-70% du temps de requête
+-- NOTE: GIN ne supporte pas INCLUDE. Utilisez GIN pour la recherche texte,
+-- et B-Tree pour l'ordre/pagination ou filtres additionnels.
 
--- Ville autocomplete covering index
+-- Ville autocomplete: index trigram GIN sur nom
 DROP INDEX IF EXISTS location_ville_nom_trgm_idx;
-CREATE INDEX location_ville_nom_trgm_covering_idx ON location_ville 
-    USING gin (nom gin_trgm_ops) 
-    INCLUDE (id, code_postal_principal, departement, slug);
+CREATE INDEX location_ville_nom_trgm_idx ON location_ville USING gin (nom gin_trgm_ops);
 
--- Composite index pour cursor pagination
+-- Cursor pagination et requêtes ordonnées
 CREATE INDEX location_ville_nom_id_idx ON location_ville (nom, id);
 CREATE INDEX location_ville_created_id_idx ON location_ville (created_at DESC, id DESC);
 
--- SousCategorie avec categorie info (évite JOIN)
+-- SousCategorie: GIN sur nom + B-Tree pour filtre catégorie
 DROP INDEX IF EXISTS subcategory_souscategorie_nom_trgm_idx;
-CREATE INDEX subcategory_souscategorie_nom_covering_idx ON subcategory_souscategorie 
-    USING gin (nom gin_trgm_ops)
-    INCLUDE (id, slug, categorie_id);
+CREATE INDEX subcategory_souscategorie_nom_trgm_idx ON subcategory_souscategorie USING gin (nom gin_trgm_ops);
+CREATE INDEX subcategory_souscategorie_cat_nom_idx ON subcategory_souscategorie (categorie_id, nom);
 ```
 
 ### Materialized View pour Stats
