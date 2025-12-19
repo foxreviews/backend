@@ -23,6 +23,12 @@ services:
     ports:
       - '8003:8000'
     command: /start
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
     networks:
       - default
       - foxreviews_shared
@@ -61,9 +67,14 @@ services:
     image: foxreviews_local_celeryworker
     container_name: foxreviews_local_celeryworker
     depends_on:
-      - redis
-      - postgres
-      - mailpit
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_started
+      mailpit:
+        condition: service_started
+      django:
+        condition: service_healthy
     ports: []
     command: /start-celeryworker
     networks:
@@ -75,9 +86,14 @@ services:
     image: foxreviews_local_celerybeat
     container_name: foxreviews_local_celerybeat
     depends_on:
-      - redis
-      - postgres
-      - mailpit
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_started
+      mailpit:
+        condition: service_started
+      django:
+        condition: service_healthy
     ports: []
     command: /start-celerybeat
     networks:
@@ -91,6 +107,13 @@ services:
     ports:
       - '5558:5555'
     command: /start-flower
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_started
+      django:
+        condition: service_healthy
     networks:
       - default
       - foxreviews_shared
