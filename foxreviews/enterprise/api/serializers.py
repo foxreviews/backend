@@ -66,6 +66,8 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
         source="entreprise.nom_commercial",
         read_only=True,
     )
+    siren = serializers.CharField(source="entreprise.siren", read_only=True)
+    siret = serializers.CharField(source="entreprise.siret", read_only=True)
     sous_categorie_nom = serializers.CharField(
         source="sous_categorie.nom",
         read_only=True,
@@ -78,6 +80,8 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
             "id",
             "entreprise",
             "entreprise_nom",
+            "siren",
+            "siret",
             "sous_categorie",
             "sous_categorie_nom",
             "ville",
@@ -103,6 +107,8 @@ class SearchResultSerializer(serializers.ModelSerializer):
     """Serializer pour résultats de recherche avec avis IA."""
 
     nom = serializers.CharField(source="entreprise.nom", read_only=True)
+    siren = serializers.CharField(source="entreprise.siren", read_only=True)
+    siret = serializers.CharField(source="entreprise.siret", read_only=True)
     slug = serializers.SerializerMethodField()
     ville = serializers.CharField(source="ville.nom", read_only=True)
     categorie = serializers.CharField(
@@ -121,6 +127,8 @@ class SearchResultSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "nom",
+            "siren",
+            "siret",
             "slug",
             "ville",
             "categorie",

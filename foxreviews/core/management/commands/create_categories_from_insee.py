@@ -55,6 +55,11 @@ class Command(BaseCommand):
             type=int,
             help="Traiter uniquement les N codes NAF les plus fréquents",
         )
+        parser.add_argument(
+            "--show-examples",
+            action="store_true",
+            help="Afficher des exemples d'entreprises pour chaque code NAF",
+        )
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -74,7 +79,8 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("\n⚠️  MODE DRY-RUN (simulation uniquement)\n"))
 
         # Étape 1: Analyser les codes NAF non mappés
-        unmapped_stats = self._get_unmapped_naf_stats(top_n)
+        show_examples = options.get("show_examples", False)
+        unmapped_stats = self._get_unmapped_naf_stats(top_n, show_examples)
 
         if not unmapped_stats:
             self.stdout.write(self.style.SUCCESS("\n✅ Tous les codes NAF sont déjà mappés !"))
@@ -92,6 +98,7 @@ class Command(BaseCommand):
         new_mappings = self._create_categories_and_subcategories(
             categorized_naf,
             dry_run,
+            show_examples,
         )
 
         # Étape 4: Mettre à jour naf_mapping.py
@@ -101,12 +108,16 @@ class Command(BaseCommand):
         # Résumé final
         self._print_summary(categorized_naf, new_mappings, dry_run)
 
-    def _get_unmapped_naf_stats(self, top_n=None):
+    def _get_unmapped_naf_stats(self, top_n=None, show_examples=False):
         """
         Récupère les statistiques des codes NAF non mappés.
 
+        Args:
+            top_n: Limiter au top N codes
+            show_examples: Inclure des exemples d'entreprises
+
         Returns:
-            list: Liste de dict avec naf_code, naf_libelle, count
+            list: Liste de dict avec naf_code, naf_libelle, count, examples (optionnel)
         """
         self.stdout.write("\n🔍 Analyse des codes NAF non mappés...")
 
@@ -129,7 +140,24 @@ class Command(BaseCommand):
             query = query[:top_n]
             self.stdout.write(f"   Limitation: top {top_n} codes")
 
-        return list(query)
+        stats = list(query)
+
+        # Ajouter des exemples d'entreprises si demandé
+        if show_examples:
+            self.stdout.write("   Récupération d'exemples d'entreprises...")
+            for stat in stats:
+                naf_code = stat["naf_code"]
+                examples = (
+                    Entreprise.objects
+                    .filter(naf_code=naf_code)
+                    .exclude(naf_libelle="")
+                    .exclude(naf_libelle__startswith="Activité ")
+                    .values("siren", "nom", "ville_nom", "code_postal")
+                    [:3]  # 3 exemples max
+                )
+                stat["examples"] = list(examples)
+
+        return stats
 
     def _categorize_naf_codes(self, unmapped_stats):
         """
@@ -304,9 +332,14 @@ class Command(BaseCommand):
 
         return categorized
 
-    def _create_categories_and_subcategories(self, categorized_naf, dry_run):
+    def _create_categories_and_subcategories(self, categorized_naf, dry_run, show_examples=False):
         """
         Crée les catégories et sous-catégories.
+
+        Args:
+            categorized_naf: Dict de codes NAF catégorisés
+            dry_run: Mode simulation
+            show_examples: Afficher des exemples d'entreprises
 
         Returns:
             list: Liste des nouveaux mappings créés
@@ -361,6 +394,18 @@ class Command(BaseCommand):
                     f"{naf_code} → {category_slug} > {sous_cat_slug[:40]} "
                     f"({count} entreprises)",
                 )
+
+                # Afficher des exemples si demandé
+                if show_examples and "examples" in naf_data:
+                    for example in naf_data["examples"]:
+                        siren = example.get("siren", "N/A")
+                        nom = example.get("nom", "Sans nom")[:40]
+                        ville = example.get("ville_nom", "")
+                        cp = example.get("code_postal", "")
+                        location = f"{ville} {cp}" if ville else "Localisation inconnue"
+                        self.stdout.write(
+                            f"      • SIREN {siren} - {nom} - {location}",
+                        )
 
         if not dry_run:
             self.stdout.write(
