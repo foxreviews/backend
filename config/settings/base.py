@@ -472,6 +472,15 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
+    # Throttling pour protéger l'API sous charge
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "100/hour",  # Utilisateurs anonymes: 100 req/h
+        "user": "1000/hour",  # Utilisateurs authentifiés: 1000 req/h
+    },
 }
 
 # django-cors-headers - https://github.com/adamchainz/django-cors-headers#setup

@@ -13,6 +13,7 @@ from rest_framework.response import Response
 
 from foxreviews.core.ai_service import AIService
 from foxreviews.core.ai_service import AIServiceError
+from foxreviews.core.pagination import EnterpriseCursorPagination
 from foxreviews.core.pagination import ResultsPageNumberPagination
 from foxreviews.core.permissions import IsAuthenticatedOrReadOnly
 from foxreviews.core.viewsets import CRUDViewSet
@@ -29,11 +30,16 @@ class EntrepriseViewSet(CRUDViewSet):
     ViewSet pour Entreprise.
 
     Permissions: Lecture publique, modification authentifiée.
+    Note: Utilise cursor pagination pour supporter millions d'enregistrements.
+    Optimisé avec .only() pour limiter les champs chargés.
     """
 
-    queryset = Entreprise.objects.all()
+    queryset = Entreprise.objects.only(
+        "id", "siren", "siret", "nom", "nom_commercial",
+        "ville_nom", "code_postal", "is_active", "created_at"
+    )
     serializer_class = EntrepriseListSerializer
-    pagination_class = ResultsPageNumberPagination
+    pagination_class = EnterpriseCursorPagination  # ✅ Performance constante sur 4M+ entreprises
     permission_classes = [IsAuthenticatedOrReadOnly]
     filter_backends = [
         DjangoFilterBackend,
@@ -52,6 +58,34 @@ class EntrepriseViewSet(CRUDViewSet):
     ordering_fields = ["nom", "created_at"]
     ordering = ["nom"]
 
+    def get_queryset(self):
+        """Optimise le queryset selon l'action + filtre entreprises sans avis."""
+        queryset = super().get_queryset()
+        
+        # Pour retrieve, charger tous les champs
+        if self.action == "retrieve":
+            base_qs = Entreprise.objects.all()
+        else:
+            # Pour list, utiliser .only() (déjà défini dans queryset de base)
+            base_qs = queryset
+        
+        # Filtrage des entreprises sans avis
+        # Admins et staff voient tout (pour pouvoir ajouter des avis)
+        if self.request.user.is_authenticated and (self.request.user.is_staff or self.request.user.is_superuser):
+            return base_qs
+        
+        # Paramètre show_all=true pour les clients authentifiés (gestion de leurs entreprises)
+        show_all = self.request.query_params.get('show_all', 'false').lower() == 'true'
+        if self.request.user.is_authenticated and show_all:
+            # Clients authentifiés peuvent voir leurs entreprises même sans avis
+            return base_qs
+        
+        # API publique : uniquement entreprises avec au moins 1 avis
+        # Filtre via ProLocalisation.nb_avis > 0
+        return base_qs.filter(
+            pro_localisations__nb_avis__gt=0
+        ).distinct()
+    
     def get_serializer_class(self):
         """Utilise le serializer détaillé pour retrieve."""
         if self.action == "retrieve":
@@ -148,13 +182,19 @@ class ProLocalisationViewSet(CRUDViewSet):
     ViewSet pour ProLocalisation.
 
     Permissions: Lecture publique, modification authentifiée.
+    Optimisé: select_related + .only() pour éviter N+1 et limiter les champs.
     """
 
     queryset = ProLocalisation.objects.select_related(
         "entreprise",
         "sous_categorie",
         "ville",
-    ).all()
+    ).only(
+        "id", "score_global", "note_moyenne", "nb_avis", "is_active", "is_verified", "created_at",
+        "entreprise__id", "entreprise__nom", "entreprise__nom_commercial",
+        "sous_categorie__id", "sous_categorie__nom",
+        "ville__id", "ville__nom"
+    )
     serializer_class = ProLocalisationListSerializer
     pagination_class = ResultsPageNumberPagination
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -169,6 +209,7 @@ class ProLocalisationViewSet(CRUDViewSet):
         "ville",
         "is_active",
         "is_verified",
+        "nb_avis",  # Permet de filtrer par nombre d'avis
     ]
     search_fields = [
         "entreprise__nom",
@@ -179,6 +220,34 @@ class ProLocalisationViewSet(CRUDViewSet):
     ordering_fields = ["score_global", "note_moyenne", "nb_avis", "created_at"]
     ordering = ["-score_global", "-note_moyenne"]
 
+    def get_queryset(self):
+        """Optimise le queryset selon l'action + filtre sans avis."""
+        queryset = super().get_queryset()
+        
+        # Pour retrieve, charger tous les champs
+        if self.action == "retrieve":
+            base_qs = ProLocalisation.objects.select_related(
+                "entreprise",
+                "sous_categorie",
+                "ville",
+            ).all()
+        else:
+            # Pour list, utiliser .only() (déjà défini)
+            base_qs = queryset
+        
+        # Filtrage des ProLocalisations sans avis
+        # Admins et staff voient tout
+        if self.request.user.is_authenticated and (self.request.user.is_staff or self.request.user.is_superuser):
+            return base_qs
+        
+        # Paramètre show_all=true pour les clients authentifiés
+        show_all = self.request.query_params.get('show_all', 'false').lower() == 'true'
+        if self.request.user.is_authenticated and show_all:
+            return base_qs
+        
+        # API publique : uniquement ProLocalisations avec au moins 1 avis
+        return base_qs.filter(nb_avis__gt=0)
+    
     def get_serializer_class(self):
         """Utilise le serializer détaillé pour retrieve."""
         if self.action == "retrieve":
