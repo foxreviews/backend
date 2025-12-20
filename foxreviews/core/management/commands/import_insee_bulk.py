@@ -160,6 +160,12 @@ class Command(BaseCommand):
                 self._import_multiple_naf(options)
                 return
 
+            # Reprendre depuis un checkpoint ?
+            if options["resume"]:
+                self._resume_from_checkpoint(options)
+                self._display_final_stats()
+                return
+
             # Validation des arguments
             if not any(
                 [
@@ -178,11 +184,8 @@ class Command(BaseCommand):
                     msg,
                 )
 
-            # Reprendre depuis un checkpoint ?
-            if options["resume"]:
-                self._resume_from_checkpoint(options)
             # Nouveau import
-            elif options["csv_file"]:
+            if options["csv_file"]:
                 self._import_from_csv(options)
             else:
                 self._import_from_api(options)
@@ -469,7 +472,7 @@ class Command(BaseCommand):
         # Adresse
         adresse_complete = self._build_adresse(adresse)
         code_postal = adresse.get("codePostalEtablissement", "")
-        ville_nom = adresse.get("libelleCommuneEtablissement", "")
+        ville_nom = adresse.get("libelleCommuneEtablissement", "") or "Ville non renseignée"
 
         # NAF avec code et libellé depuis periodesEtablissement
         naf_code = (periode_actuelle.get("activitePrincipaleEtablissement") or "").strip()
@@ -489,8 +492,15 @@ class Command(BaseCommand):
         try:
             entreprise = Entreprise.objects.get(siren=siren)
 
-            if force_update and not dry_run:
-                # Mise à jour avec données INSEE
+            if dry_run:
+                self.stats["skipped"] += 1
+                return
+
+            # Logique de mise à jour intelligente
+            updated = False
+
+            if force_update:
+                # Mode force: écraser toutes les données principales
                 entreprise.siret = siret
                 entreprise.nom = nom
                 entreprise.nom_commercial = nom_commercial or ""
@@ -499,19 +509,65 @@ class Command(BaseCommand):
                 entreprise.ville_nom = ville_nom
                 entreprise.naf_code = naf_code
                 entreprise.naf_libelle = naf_libelle or f"Activité {naf_code}"
-                # Ne pas écraser les données de contact si elles existent
-                if not entreprise.telephone:
-                    entreprise.telephone = telephone
-                if not entreprise.email_contact:
-                    entreprise.email_contact = email_contact
-                if not entreprise.site_web:
-                    entreprise.site_web = site_web
-                entreprise.save()
+                updated = True
+            else:
+                # Mode smart: compléter uniquement les champs vides/manquants
+                if not entreprise.siret and siret:
+                    entreprise.siret = siret
+                    updated = True
+                
+                if not entreprise.nom or entreprise.nom == "Entreprise sans dénomination":
+                    if nom and nom != "Entreprise sans dénomination":
+                        entreprise.nom = nom
+                        updated = True
+                
+                if not entreprise.nom_commercial and nom_commercial:
+                    entreprise.nom_commercial = nom_commercial
+                    updated = True
+                
+                if not entreprise.adresse or entreprise.adresse == "Adresse non renseignée":
+                    if adresse_complete and adresse_complete != "Adresse non renseignée":
+                        entreprise.adresse = adresse_complete
+                        updated = True
+                
+                if not entreprise.code_postal and code_postal:
+                    entreprise.code_postal = code_postal
+                    updated = True
+                
+                if not entreprise.ville_nom or entreprise.ville_nom == "Ville non renseignée":
+                    if ville_nom and ville_nom != "Ville non renseignée":
+                        entreprise.ville_nom = ville_nom
+                        updated = True
+                
+                if not entreprise.naf_code and naf_code:
+                    entreprise.naf_code = naf_code
+                    updated = True
+                
+                if not entreprise.naf_libelle or entreprise.naf_libelle.startswith("Activité "):
+                    if naf_libelle:
+                        entreprise.naf_libelle = naf_libelle
+                        updated = True
 
+            # Toujours compléter les données de contact si vides (même en force_update)
+            if not entreprise.telephone and telephone:
+                entreprise.telephone = telephone
+                updated = True
+            
+            if not entreprise.email_contact and email_contact:
+                entreprise.email_contact = email_contact
+                updated = True
+            
+            if not entreprise.site_web and site_web:
+                entreprise.site_web = site_web
+                updated = True
+
+            if updated:
+                entreprise.save()
                 self.stats["updated"] += 1
-                logger.debug(f"🔄 Entreprise mise à jour: {nom} ({siren})")
+                logger.info(f"🔄 Entreprise enrichie: {nom} ({siren})")
             else:
                 self.stats["skipped"] += 1
+                logger.info(f"⏭️  Entreprise déjà complète: {nom} ({siren})")
 
             return
 

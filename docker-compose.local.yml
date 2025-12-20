@@ -81,6 +81,23 @@ services:
       - default
       - foxreviews_shared
 
+  cron:
+    <<: *django
+    image: foxreviews_local_cron
+    container_name: foxreviews_local_cron
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_started
+      django:
+        condition: service_healthy
+    ports: []
+    command: /start-cron
+    networks:
+      - default
+      - foxreviews_shared
+
   celerybeat:
     <<: *django
     image: foxreviews_local_celerybeat
@@ -96,6 +113,8 @@ services:
         condition: service_healthy
     ports: []
     command: /start-celerybeat
+    profiles:
+      - celery  # Désactivé par défaut, utiliser cron à la place
     networks:
       - default
       - foxreviews_shared

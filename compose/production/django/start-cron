@@ -1,0 +1,20 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+# Créer le fichier de log si nécessaire
+mkdir -p /var/log
+touch /var/log/cron.log
+
+# Installer le crontab
+crontab /app/compose/production/django/crontab
+
+# Afficher le crontab installé
+echo "📅 Crontab installé:"
+crontab -l
+
+# Lancer cron en foreground
+echo "🚀 Démarrage de cron..."
+cron -f

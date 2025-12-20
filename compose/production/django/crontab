@@ -1,0 +1,30 @@
+# FOX-Reviews - Tâches planifiées (crontab)
+# Format: minute hour day month day_of_week command
+
+# Import quotidien INSEE basé sur les villes (tous les jours à 2h)
+# Importe les entreprises pour tous les départements des villes en BDD
+0 2 * * * cd /app && python manage.py import_insee_by_villes --limit-per-dept 5000 --min-population 5000 >> /var/log/cron.log 2>&1
+
+# Désactivation des sponsorisations expirées (tous les jours à 1h)
+0 1 * * * cd /app && python manage.py deactivate_expired_sponsorships >> /var/log/cron.log 2>&1
+
+# Régénération des avis IA (tous les jours à 2h30)
+30 2 * * * cd /app && python manage.py regenerate_expired_reviews --batch-size 100 >> /var/log/cron.log 2>&1
+
+# Mise à jour des scores Pro (tous les jours à 3h)
+0 3 * * * cd /app && python manage.py update_pro_scores >> /var/log/cron.log 2>&1
+
+# Nettoyage des vieux fichiers (dimanche à 3h)
+0 3 * * 0 cd /app && find /tmp -name "foxreviews_*" -mtime +7 -delete >> /var/log/cron.log 2>&1
+
+# Génération des contenus catégories (15 jan/avr/jul/oct à 4h)
+0 4 15 1,4,7,10 * cd /app && python manage.py generate_category_contents >> /var/log/cron.log 2>&1
+
+# Génération des contenus villes (1er fév/aoû à 5h)
+0 5 1 2,8 * cd /app && python manage.py generate_ville_contents >> /var/log/cron.log 2>&1
+
+# Backup base de données (tous les jours à 4h)
+0 4 * * * cd /app && python manage.py dbbackup >> /var/log/cron.log 2>&1
+
+# Rotation des logs (tous les lundis à 5h)
+0 5 * * 1 cd /app && find /var/log -name "*.log" -size +100M -exec truncate -s 10M {} \; >> /var/log/cron.log 2>&1

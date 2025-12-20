@@ -1,0 +1,19 @@
+# FOX-Reviews LOCAL - Tâches planifiées (crontab)
+# Version allégée pour développement local
+# Format: minute hour day month day_of_week command
+
+# Import quotidien INSEE basé sur les villes - TEST limité (tous les jours à 2h)
+# Seulement les villes de plus de 10k habitants, max 50 entreprises par département
+0 2 * * * cd /app && python manage.py import_insee_by_villes --limit-per-dept 50 --min-population 10000 >> /var/log/cron.log 2>&1
+
+# Désactivation des sponsorisations expirées (tous les jours à 1h)
+0 1 * * * cd /app && python manage.py deactivate_expired_sponsorships >> /var/log/cron.log 2>&1
+
+# Régénération des avis IA - TEST limité (tous les jours à 2h30)
+30 2 * * * cd /app && python manage.py regenerate_expired_reviews --batch-size 10 --limit 50 >> /var/log/cron.log 2>&1
+
+# Mise à jour des scores Pro (tous les jours à 3h)
+0 3 * * * cd /app && python manage.py update_pro_scores >> /var/log/cron.log 2>&1
+
+# Nettoyage des vieux fichiers (tous les jours à 4h)
+0 4 * * * cd /app && find /tmp -name "foxreviews_*" -mtime +1 -delete >> /var/log/cron.log 2>&1

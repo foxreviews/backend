@@ -59,10 +59,17 @@ services:
     image: foxreviews_production_celeryworker
     command: /start-celeryworker
 
+  cron:
+    <<: *django
+    image: foxreviews_production_cron
+    command: /start-cron
+
   celerybeat:
     <<: *django
     image: foxreviews_production_celerybeat
     command: /start-celerybeat
+    profiles:
+      - celery  # Désactivé par défaut, utiliser cron à la place
 
   flower:
     <<: *django

@@ -104,18 +104,38 @@ class Command(BaseCommand):
                     skipped += 1
                     continue
 
+                # Normaliser le nom pour respecter max_length=100 en base
+                name_db = name[:100]
+
                 if not slug:
-                    slug = slugify(name)[:120]
+                    slug = slugify(name)
 
-                # Chercher une sous-catégorie existante sur ce slug
-                try:
-                    sous_cat = SousCategorie.objects.get(slug=slug)
+                # Sécurité : toujours tronquer à la taille max du champ slug
+                slug = slug[:120]
+
+                # 1) Essayer de trouver par (categorie, nom_db) pour éviter les doublons
+                sous_cat = (
+                    SousCategorie.objects.filter(
+                        categorie=default_category,
+                        nom=name_db,
+                    ).first()
+                )
+
+                if sous_cat is not None:
                     action = "update"
-                except SousCategorie.DoesNotExist:
-                    sous_cat = SousCategorie(slug=slug, categorie=default_category)
-                    action = "create"
+                else:
+                    # 2) Sinon, essayer par slug (peut déjà exister avec une autre catégorie)
+                    try:
+                        sous_cat = SousCategorie.objects.get(slug=slug)
+                        action = "update"
+                    except SousCategorie.DoesNotExist:
+                        sous_cat = SousCategorie(
+                            slug=slug,
+                            categorie=default_category,
+                        )
+                        action = "create"
 
-                sous_cat.nom = name[:100]
+                sous_cat.nom = name_db
                 sous_cat.description = description
 
                 if dry_run:

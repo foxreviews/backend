@@ -31,7 +31,33 @@ schedule_daily_insee_import()  # planifie ~35k entreprises en batches
 - Utilisation : **mise à jour quotidienne** (créations / mises à jour) depuis l’API INSEE.
 - Implémentation : `foxreviews/core/tasks_import.py`.
 
-### 1.3 Import manuel depuis API INSEE (synchrone)
+### 1.3 Import basé sur les villes en base de données (recommandé)
+
+```bash
+# Import pour tous les départements des villes en BDD
+python manage.py import_insee_by_villes
+
+# Limiter le nombre d'entreprises par département
+python manage.py import_insee_by_villes --limit-per-dept 1000
+
+# Filtrer par population minimale des villes
+python manage.py import_insee_by_villes --min-population 10000
+
+# Départements spécifiques
+python manage.py import_insee_by_villes --departements 75,69,13
+
+# Dry run (simulation)
+python manage.py import_insee_by_villes --dry-run
+```
+
+- **Avantages** : 
+  - Utilise automatiquement tous les départements des villes en BDD
+  - Crée automatiquement les ProLocalisations (entreprise + ville + sous-catégorie)
+  - Mapping NAF → SousCategorie automatique
+- **Utilisation** : Import quotidien automatique via cron
+- Implémentation : `foxreviews/core/management/commands/import_insee_by_villes.py`.
+
+### 1.4 Import manuel depuis API INSEE (synchrone)
 
 ```bash
 # Exemple: import par département
@@ -110,39 +136,62 @@ python manage.py test_cdc_import --phase 2
 - Implémentation : `foxreviews/core/management/commands/test_cdc_import.py`.
 
 
-## 4. Tâches Celery et CRON (Beat)
+## 4. Tâches planifiées (CRON)
 
-### 4.1 Lancer les workers Celery
+### 4.1 Configuration crontab (recommandé pour Docker)
 
+Le projet utilise **crontab** au lieu de Celery Beat pour les tâches planifiées, car c'est plus simple et plus léger dans un environnement containerisé.
+
+**Fichiers de configuration:**
+- Local (dev): `compose/local/django/crontab`
+- Production: `compose/production/django/crontab`
+
+**Démarrage automatique:**
 ```bash
-# Depuis la racine du projet
-uv run celery -A config.celery_app worker -l info
+# Le service cron démarre automatiquement avec docker-compose
+docker-compose up -d
+
+# Voir les logs du cron
+docker-compose logs -f cron
+
+# Lister le crontab actif
+docker exec foxreviews_local_cron crontab -l
+
+# Éditer le crontab
+docker exec foxreviews_local_cron crontab -e
 ```
 
-- En Docker : voir les services `celeryworker` dans `docker-compose.local.yml` / `compose/production`.
+### 4.2 Tâches planifiées principales
 
-### 4.2 Lancer Celery Beat (tâches périodiques)
+**Quotidiennes:**
+- `01:00` - Désactivation des sponsorisations expirées
+- `02:00` - Import quotidien INSEE basé sur les villes en BDD
+  - Production: ~5000 entreprises/département, villes > 5000 hab
+  - Local: ~50 entreprises/département, villes > 10000 hab
+  - Crée automatiquement les ProLocalisations (entreprise + ville + sous-catégorie)
+- `02:30` - Régénération des avis IA expirés
+- `03:00` - Mise à jour des scores Pro
+- `04:00` - Backup base de données (prod uniquement)
+- `04:00` - Nettoyage des fichiers temporaires
+
+**Hebdomadaires:**
+- `Dimanche 03:00` - Nettoyage complet des vieux fichiers
+- `Lundi 05:00` - Rotation des logs
+
+**Mensuelles/Trimestrielles:**
+- `15/01, 15/04, 15/07, 15/10 à 04:00` - Génération contenus catégories
+- `01/02, 01/08 à 05:00` - Génération contenus villes
+
+### 4.3 Alternative: Celery Beat (désactivé par défaut)
+
+Si vous préférez utiliser Celery Beat au lieu de cron :
 
 ```bash
-uv run celery -A config.celery_app beat -l info
+# Activer le profil celery
+docker-compose --profile celery up -d celerybeat
+
+# Ou modifier docker-compose.yml pour retirer le profile
 ```
-
-- En prod Docker : script `compose/production/django/celery/beat/start`.
-
-### 4.3 Principales tâches planifiées (config/settings/base.py / config/celery_app.py)
-
-- `schedule_daily_insee_import` → import INSEE quotidien de ~35k entreprises
-  - CRON : tous les jours à 2h.
-- `core.regenerate_ai_reviews_nightly` → régénération nocturne des avis IA
-  - CRON : 2h30.
-- `core.regenerate_sponsored_premium` → refresh contenus sponsorisés premium
-  - CRON : 1h.
-- `core.generate_missing_ai_reviews` → génération des avis manquants
-  - CRON : 4h.
-- `core.cleanup_old_imports` → nettoyage des imports/fichiers vieux
-  - CRON : dimanche 3h.
-- Autres contenus (catégories, villes, stats) via `config/celery_app.py` :
-  - `generate-category-contents`, `generate-ville-contents`, `refresh-ville-stats`, etc.
 
 
 ## 5. Résumé par moment de vie
@@ -152,11 +201,12 @@ uv run celery -A config.celery_app beat -l info
   - Puis `auto_map_all_naf --create-proloc` pour générer les ProLocalisations.
 
 - **Mise à jour quotidienne**
-  - Celery Beat + `schedule_daily_insee_import` (cron 2h).
+  - Cron automatique à 2h : import INSEE quotidien
 
 - **Maintenance mapping et search**
   - `manage_naf_mapping --stats/--show-unmapped/--test`.
   - `suggest_naf_mapping --top N` puis mise à jour de `naf_mapping.py`.
 
 - **Nettoyage et IA**
-  - Cron `core.cleanup_old_imports`, `core.regenerate_ai_reviews_nightly`, etc., tournent automatiquement via Celery Beat.
+  - Toutes les tâches planifiées tournent automatiquement via crontab
+  - Vérifier les logs : `docker-compose logs -f cron`

@@ -36,3 +36,23 @@ logs *args:
 # manage: Executes `manage.py` command.
 manage +args:
     @docker compose run --rm django python ./manage.py {{args}}
+# cron-list: Liste toutes les tâches planifiées
+cron-list:
+    @python scripts/cron_helper.py list
+
+# cron-run: Exécute une tâche cron manuellement
+cron-run task:
+    @python scripts/cron_helper.py run {{task}}
+
+# cron-logs: Affiche les logs cron
+cron-logs:
+    @python scripts/cron_helper.py logs
+
+# cron-status: Affiche le statut du service cron
+cron-status:
+    @python scripts/cron_helper.py status
+
+# cron-restart: Redémarre le service cron
+cron-restart:
+    @echo "Redémarrage du service cron..."
+    @docker compose restart cron
