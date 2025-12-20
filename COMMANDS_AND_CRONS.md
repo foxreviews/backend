@@ -76,7 +76,27 @@ python manage.py import_insee_bulk --resume --checkpoint-file /tmp/foxreviews_in
 
 ## 2. Mapping CODES NAF → Sous-catégories
 
-### 2.1 Inspecter et tester le mapping
+### 2.1 Créer les ProLocalisations manquantes
+
+```bash
+# Créer toutes les ProLocalisations depuis les entreprises existantes
+python manage.py create_missing_prolocalisations
+
+# Dry run pour voir ce qui serait créé
+python manage.py create_missing_prolocalisations --dry-run
+
+# Limiter le nombre
+python manage.py create_missing_prolocalisations --limit 1000
+
+# Forcer la recréation
+python manage.py create_missing_prolocalisations --force
+```
+
+- **Utilisation** : Créer les ProLocalisations (entreprise + ville + sous-catégorie) manquantes
+- **Prérequis** : Avoir des entreprises en BDD, des villes, et un mapping NAF
+- Implémentation : `foxreviews/enterprise/management/commands/create_missing_prolocalisations.py`.
+
+### 2.2 Inspecter et tester le mapping NAF
 
 ```bash
 # Lister tous les mappings NAF → SousCategorie
