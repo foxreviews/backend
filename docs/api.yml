@@ -65,6 +65,12 @@ servers:
 tags:
   - name: Authentification
     description: Obtention et gestion des tokens d'authentification
+  - name: Compte
+    description: Gestion du compte utilisateur
+  - name: Facturation
+    description: Gestion des abonnements et factures
+  - name: Tracking
+    description: Suivi des clics et vues (analytics)
   - name: Recherche
     description: Moteur de recherche principal
   - name: Entreprises
@@ -85,10 +91,37 @@ tags:
     description: Paiements et abonnements
   - name: Dashboard
     description: Tableau de bord entreprise
+  - name: Export
+    description: Export des données (entreprises, avis, stats)
+  - name: Système
+    description: Endpoints système (ping, health)
   - name: Utilisateurs
     description: Gestion des utilisateurs
 
 paths:
+  # ==================== SYSTÈME ====================
+  /ping/:
+    get:
+      tags:
+        - Système
+      summary: Vérifier que l'API est en ligne
+      description: Endpoint simple pour vérifier la disponibilité de l'API
+      operationId: ping
+      responses:
+        '200':
+          description: API en ligne
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "pong"
+                  timestamp:
+                    type: string
+                    format: date-time
+
   # ==================== AUTHENTIFICATION ====================
   /auth-token/:
     post:
@@ -136,6 +169,626 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: "Impossible de se connecter avec les identifiants fournis."
+
+  /auth/register/:
+    post:
+      tags:
+        - Authentification
+      summary: Créer un nouveau compte utilisateur
+      description: |
+        Inscription d'un nouvel utilisateur. Crée automatiquement un UserProfile avec le rôle CLIENT.
+        Retourne un token d'authentification directement après l'inscription.
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - name
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: nouveau@example.com
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  example: SecurePass123!
+                name:
+                  type: string
+                  example: Jean Dupont
+                phone:
+                  type: string
+                  example: "+33612345678"
+                entreprise_id:
+                  type: string
+                  format: uuid
+                  description: UUID de l'entreprise à associer (optionnel)
+      responses:
+        '201':
+          description: Utilisateur créé avec succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      name:
+                        type: string
+                      role:
+                        type: string
+                        enum: [ADMIN, MANAGER, CLIENT, VISITEUR]
+              example:
+                token: "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"
+                user:
+                  id: "550e8400-e29b-41d4-a716-446655440000"
+                  email: "nouveau@example.com"
+                  name: "Jean Dupont"
+                  role: "CLIENT"
+        '400':
+          description: Données invalides (email déjà utilisé, mot de passe faible, etc.)
+
+  /auth/login/:
+    post:
+      tags:
+        - Authentification
+      summary: Se connecter
+      description: Connexion par email et mot de passe. Retourne un token d'authentification.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: client@example.com
+                password:
+                  type: string
+                  format: password
+                  example: SecurePassword123!
+      responses:
+        '200':
+          description: Connexion réussie
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                      name:
+                        type: string
+                      role:
+                        type: string
+              example:
+                token: "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b"
+                user:
+                  id: "550e8400-e29b-41d4-a716-446655440000"
+                  email: "client@example.com"
+                  name: "Jean Dupont"
+                  role: "CLIENT"
+        '401':
+          description: Identifiants invalides
+
+  /auth/password-reset/:
+    post:
+      tags:
+        - Authentification
+      summary: Demander la réinitialisation du mot de passe
+      description: |
+        Envoie un email avec un lien de réinitialisation du mot de passe.
+        (Note: L'envoi d'email doit être configuré dans les settings)
+      operationId: passwordResetRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: client@example.com
+      responses:
+        '200':
+          description: Email de réinitialisation envoyé (si l'email existe)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Email de réinitialisation envoyé"
+                  reset_token:
+                    type: string
+                    description: Token de réinitialisation (en développement uniquement)
+
+  # ==================== COMPTE ====================
+  /account/me/:
+    get:
+      tags:
+        - Compte
+      summary: Récupérer les informations du compte
+      description: Retourne les informations du compte de l'utilisateur connecté.
+      operationId: accountMe
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Informations du compte
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                  name:
+                    type: string
+                  phone:
+                    type: string
+                  role:
+                    type: string
+                    enum: [ADMIN, MANAGER, CLIENT, VISITEUR]
+                  entreprise:
+                    type: object
+                    nullable: true
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      nom:
+                        type: string
+              example:
+                id: "550e8400-e29b-41d4-a716-446655440000"
+                email: "client@example.com"
+                name: "Jean Dupont"
+                phone: "+33612345678"
+                role: "CLIENT"
+                entreprise:
+                  id: "660e8400-e29b-41d4-a716-446655440001"
+                  nom: "SARL Example"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /account/update/:
+    put:
+      tags:
+        - Compte
+      summary: Mettre à jour les informations du compte
+      description: Permet de modifier le nom et le téléphone de l'utilisateur connecté.
+      operationId: accountUpdate
+      security:
+        - TokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: "Jean Martin"
+                phone:
+                  type: string
+                  example: "+33698765432"
+      responses:
+        '200':
+          description: Compte mis à jour
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                  name:
+                    type: string
+                  phone:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== FACTURATION ====================
+  /billing/subscription/:
+    get:
+      tags:
+        - Facturation
+      summary: Récupérer l'abonnement actif
+      description: |
+        Retourne l'abonnement actif de l'entreprise de l'utilisateur connecté.
+        **Permission:** CLIENT (ses données) ou ADMIN (toutes les données)
+      operationId: getSubscription
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Abonnement actif
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Accès refusé (rôle MANAGER ou VISITEUR)
+        '404':
+          description: Aucun abonnement actif
+
+  /billing/invoices/:
+    get:
+      tags:
+        - Facturation
+      summary: Récupérer l'historique des factures
+      description: |
+        Retourne toutes les factures de l'entreprise de l'utilisateur connecté.
+        **Permission:** CLIENT (ses données) ou ADMIN (toutes les données)
+      operationId: getInvoices
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Liste des factures
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invoice'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Accès refusé
+
+  # ==================== TRACKING ====================
+  /billing/track/click/:
+    post:
+      tags:
+        - Tracking
+      summary: Enregistrer un clic sur une entreprise
+      description: |
+        **ENDPOINT PUBLIC** - Appelé par le frontend quand un utilisateur clique sur une entreprise.
+        Crée un ClickEvent et incrémente le compteur nb_clicks de la Sponsorisation.
+      operationId: trackClick
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - entreprise_id
+                - source
+                - page_type
+              properties:
+                entreprise_id:
+                  type: string
+                  format: uuid
+                pro_localisation_id:
+                  type: string
+                  format: uuid
+                  description: Optionnel
+                sponsorisation_id:
+                  type: string
+                  format: uuid
+                  description: Optionnel (si clic sur entreprise sponsorisée)
+                source:
+                  type: string
+                  enum: [sponsorisation, rotation, seo, direct]
+                  example: "sponsorisation"
+                page_type:
+                  type: string
+                  enum: [home, category, city, search]
+                  example: "category"
+                page_url:
+                  type: string
+                  format: uri
+                  example: "https://example.com/paris/plombiers"
+                referrer:
+                  type: string
+                  format: uri
+                  example: "https://google.com"
+      responses:
+        '201':
+          description: Clic enregistré
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Clic enregistré"
+                  click_id:
+                    type: string
+                    format: uuid
+        '400':
+          description: Données invalides
+
+  /billing/track/view/:
+    post:
+      tags:
+        - Tracking
+      summary: Enregistrer l'affichage d'une entreprise
+      description: |
+        **ENDPOINT PUBLIC** - Appelé par le frontend quand une entreprise est affichée à l'écran.
+        Crée un ViewEvent et incrémente le compteur nb_impressions de la Sponsorisation.
+      operationId: trackView
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - entreprise_id
+                - source
+                - page_type
+              properties:
+                entreprise_id:
+                  type: string
+                  format: uuid
+                pro_localisation_id:
+                  type: string
+                  format: uuid
+                sponsorisation_id:
+                  type: string
+                  format: uuid
+                source:
+                  type: string
+                  enum: [sponsorisation, rotation, seo, direct]
+                page_type:
+                  type: string
+                  enum: [home, category, city, search]
+                position:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                  description: Position dans la rotation (1-5)
+                  example: 1
+                page_url:
+                  type: string
+                  format: uri
+      responses:
+        '201':
+          description: Vue enregistrée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Vue enregistrée"
+                  view_id:
+                    type: string
+                    format: uuid
+
+  /billing/track/stats/:
+    get:
+      tags:
+        - Tracking
+      summary: Récupérer les statistiques de tracking
+      description: |
+        Retourne les statistiques de clics et vues de l'entreprise sur les 30 derniers jours.
+        **Permission:** CLIENT (ses données) ou ADMIN
+      operationId: getTrackingStats
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Statistiques de tracking
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entreprise_id:
+                    type: string
+                    format: uuid
+                  entreprise_nom:
+                    type: string
+                  total:
+                    type: object
+                    properties:
+                      clicks:
+                        type: integer
+                      views:
+                        type: integer
+                  last_30_days:
+                    type: object
+                    properties:
+                      clicks:
+                        type: integer
+                      views:
+                        type: integer
+                      ctr:
+                        type: number
+                        format: float
+                        description: Click-Through Rate (%)
+                  clicks_by_source:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source:
+                          type: string
+                        count:
+                          type: integer
+                  views_by_source:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source:
+                          type: string
+                        count:
+                          type: integer
+              example:
+                entreprise_id: "550e8400-e29b-41d4-a716-446655440000"
+                entreprise_nom: "SARL Example"
+                total:
+                  clicks: 1234
+                  views: 5678
+                last_30_days:
+                  clicks: 123
+                  views: 456
+                  ctr: 26.97
+                clicks_by_source:
+                  - source: "sponsorisation"
+                    count: 50
+                  - source: "seo"
+                    count: 30
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== EXPORT ====================
+  /export/entreprises/:
+    get:
+      tags:
+        - Export
+      summary: Exporter les entreprises en CSV
+      description: Exporte toutes les entreprises actives au format CSV
+      operationId: exportEntreprises
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Fichier CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /export/prolocalisations/:
+    get:
+      tags:
+        - Export
+      summary: Exporter les ProLocalisations en CSV
+      description: Exporte toutes les ProLocalisations actives au format CSV
+      operationId: exportProlocalisations
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Fichier CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /export/avis/:
+    get:
+      tags:
+        - Export
+      summary: Exporter les avis décryptés en CSV
+      description: Exporte tous les avis décryptés au format CSV
+      operationId: exportAvis
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Fichier CSV
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /export/pages-wordpress/:
+    get:
+      tags:
+        - Export
+      summary: Exporter les pages WordPress en JSON
+      description: Génère les données pour créer les pages WordPress (catégories, villes)
+      operationId: exportPagesWordPress
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Données JSON pour WordPress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                  villes:
+                    type: array
+                    items:
+                      type: object
+
+  /export/stats/:
+    get:
+      tags:
+        - Export
+      summary: Exporter les statistiques globales
+      description: Retourne les statistiques globales de la plateforme
+      operationId: exportStats
+      security:
+        - TokenAuth: []
+      responses:
+        '200':
+          description: Statistiques globales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_entreprises:
+                    type: integer
+                  total_prolocalisations:
+                    type: integer
+                  total_avis:
+                    type: integer
+                  total_villes:
+                    type: integer
+                  total_categories:
+                    type: integer
 
   # ==================== RECHERCHE ====================
   /search/:
@@ -1520,6 +2173,166 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Sponsorisation'
+
+    # ==================== BILLING ====================
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entreprise:
+          type: string
+          format: uuid
+        entreprise_nom:
+          type: string
+        pro_localisation:
+          type: string
+          format: uuid
+          nullable: true
+        stripe_customer_id:
+          type: string
+        stripe_subscription_id:
+          type: string
+        stripe_checkout_session_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, past_due, canceled, incomplete, incomplete_expired, trialing, unpaid]
+          description: Statut Stripe de l'abonnement
+        current_period_start:
+          type: string
+          format: date-time
+        current_period_end:
+          type: string
+          format: date-time
+        cancel_at_period_end:
+          type: boolean
+        canceled_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        trial_start:
+          type: string
+          format: date-time
+          nullable: true
+        trial_end:
+          type: string
+          format: date-time
+          nullable: true
+        amount:
+          type: number
+          format: decimal
+          description: Montant mensuel en euros
+        currency:
+          type: string
+          example: "eur"
+        is_active:
+          type: boolean
+          description: Calculé automatiquement (status=active ET current_period_end > now)
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      example:
+        id: "550e8400-e29b-41d4-a716-446655440000"
+        entreprise: "660e8400-e29b-41d4-a716-446655440001"
+        entreprise_nom: "SARL Example"
+        stripe_customer_id: "cus_abc123"
+        stripe_subscription_id: "sub_xyz789"
+        status: "active"
+        current_period_start: "2025-01-01T00:00:00Z"
+        current_period_end: "2025-02-01T00:00:00Z"
+        cancel_at_period_end: false
+        amount: 99.00
+        currency: "eur"
+        is_active: true
+        created_at: "2025-01-01T00:00:00Z"
+        updated_at: "2025-01-15T12:30:00Z"
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        subscription:
+          type: string
+          format: uuid
+        entreprise:
+          type: string
+          format: uuid
+        stripe_invoice_id:
+          type: string
+        stripe_payment_intent_id:
+          type: string
+          nullable: true
+        invoice_number:
+          type: string
+          example: "INV-2025-001"
+        status:
+          type: string
+          enum: [draft, open, paid, void, uncollectible]
+          description: Statut Stripe de la facture
+        amount_due:
+          type: number
+          format: decimal
+          description: Montant dû en euros
+        amount_paid:
+          type: number
+          format: decimal
+          description: Montant payé en euros
+        currency:
+          type: string
+          example: "eur"
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+        invoice_pdf:
+          type: string
+          format: uri
+          nullable: true
+          description: URL du PDF de la facture (Stripe)
+        hosted_invoice_url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL hébergée de la facture (Stripe)
+        is_paid:
+          type: boolean
+          description: Calculé automatiquement (status=paid)
+        created_at:
+          type: string
+          format: date-time
+      example:
+        id: "770e8400-e29b-41d4-a716-446655440002"
+        subscription: "550e8400-e29b-41d4-a716-446655440000"
+        stripe_invoice_id: "in_abc123"
+        invoice_number: "INV-2025-001"
+        status: "paid"
+        amount_due: 99.00
+        amount_paid: 99.00
+        currency: "eur"
+        period_start: "2025-01-01T00:00:00Z"
+        period_end: "2025-02-01T00:00:00Z"
+        invoice_pdf: "https://pay.stripe.com/invoice/abc123/pdf"
+        hosted_invoice_url: "https://invoice.stripe.com/i/abc123"
+        is_paid: true
+        created_at: "2025-01-01T00:05:00Z"
 
     # ==================== SEARCH ====================
     SearchResults:

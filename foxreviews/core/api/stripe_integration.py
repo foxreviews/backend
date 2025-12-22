@@ -4,10 +4,12 @@ Gestion des paiements et abonnements via Stripe.
 """
 
 import logging
+from datetime import timedelta
 
 import stripe
 from django.conf import settings
 from django.http import HttpResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from drf_spectacular.utils import OpenApiResponse
@@ -19,6 +21,8 @@ from rest_framework.decorators import permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from foxreviews.billing.models import Invoice
+from foxreviews.billing.models import Subscription
 from foxreviews.core.services import SponsorshipService
 from foxreviews.enterprise.models import ProLocalisation
 from foxreviews.sponsorisation.models import Sponsorisation
@@ -207,78 +211,203 @@ def stripe_webhook(request):
 
 
 def _handle_checkout_completed(session):
-    """Gère la complétion du checkout: active la sponsorisation."""
+    """Gère la complétion du checkout: active la sponsorisation ET crée Subscription."""
     metadata = session.get("metadata", {})
     pro_localisation_id = metadata.get("pro_localisation_id")
+    entreprise_id = metadata.get("entreprise_id")
     duration_months = int(metadata.get("duration_months", 1))
     montant_mensuel = float(metadata.get("montant_mensuel", 99.0))
-    subscription_id = session.get("subscription")
+    
+    stripe_subscription_id = session.get("subscription")
+    stripe_customer_id = session.get("customer")
+    stripe_checkout_session_id = session.get("id")
 
     try:
-        # Créer la sponsorisation
+        from foxreviews.enterprise.models import Entreprise
+
+        # Récupérer l'entreprise
+        entreprise = Entreprise.objects.get(id=entreprise_id)
+        pro_loc = ProLocalisation.objects.get(id=pro_localisation_id)
+
+        # Récupérer les détails de la subscription Stripe
+        stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
+        
+        # Créer l'objet Subscription Django
+        subscription = Subscription.objects.create(
+            entreprise=entreprise,
+            pro_localisation=pro_loc,
+            stripe_customer_id=stripe_customer_id,
+            stripe_subscription_id=stripe_subscription_id,
+            stripe_checkout_session_id=stripe_checkout_session_id,
+            status=stripe_sub.get("status", "active"),
+            current_period_start=timezone.datetime.fromtimestamp(
+                stripe_sub["current_period_start"],
+                tz=timezone.utc,
+            ),
+            current_period_end=timezone.datetime.fromtimestamp(
+                stripe_sub["current_period_end"],
+                tz=timezone.utc,
+            ),
+            amount=montant_mensuel,
+            currency="eur",
+            metadata=metadata,
+        )
+
+        # Créer la sponsorisation (ancien système)
         sponso = SponsorshipService.create_sponsorship(
             pro_localisation_id=pro_localisation_id,
             duration_months=duration_months,
             montant_mensuel=montant_mensuel,
-            subscription_id=subscription_id,
+            subscription_id=stripe_subscription_id,
         )
 
-        logger.info(f"Sponsorisation créée: {sponso.id}")
+        logger.info(
+            f"Checkout completed: Subscription {subscription.id}, Sponsorisation {sponso.id}",
+        )
 
     except Exception as e:
-        logger.exception(f"Erreur création sponsorisation: {e}")
+        logger.exception(f"Erreur checkout completed: {e}")
 
 
-def _handle_payment_succeeded(invoice):
-    """Gère le succès du paiement: prolonge la sponsorisation."""
-    subscription_id = invoice.get("subscription")
-
-    try:
-        # Trouver la sponsorisation
-        sponso = Sponsorisation.objects.get(subscription_id=subscription_id)
-        sponso.statut_paiement = "active"
-        sponso.is_active = True
-        sponso.save()
-
-        logger.info(f"Paiement réussi pour sponsorisation {sponso.id}")
-
-    except Sponsorisation.DoesNotExist:
-        logger.warning(
-            f"Sponsorisation introuvable pour subscription {subscription_id}",
-        )
-
-
-def _handle_payment_failed(invoice):
-    """Gère l'échec du paiement: marque comme impayé."""
-    subscription_id = invoice.get("subscription")
+def _handle_payment_succeeded(invoice_data):
+    """Gère le succès du paiement: prolonge la sponsorisation ET crée Invoice."""
+    stripe_subscription_id = invoice_data.get("subscription")
+    stripe_invoice_id = invoice_data.get("id")
+    stripe_payment_intent_id = invoice_data.get("payment_intent")
 
     try:
-        sponso = Sponsorisation.objects.get(subscription_id=subscription_id)
-        sponso.statut_paiement = "past_due"
-        # On ne désactive pas immédiatement, on laisse un délai de grâce
-        sponso.save()
+        # Trouver la subscription Django
+        subscription = Subscription.objects.get(stripe_subscription_id=stripe_subscription_id)
 
-        logger.warning(f"Paiement échoué pour sponsorisation {sponso.id}")
+        # Mettre à jour le statut
+        subscription.status = "active"
+        subscription.save(update_fields=["status", "updated_at"])
 
-    except Sponsorisation.DoesNotExist:
-        logger.warning(
-            f"Sponsorisation introuvable pour subscription {subscription_id}",
+        # Créer la facture
+        Invoice.objects.create(
+            subscription=subscription,
+            entreprise=subscription.entreprise,
+            stripe_invoice_id=stripe_invoice_id,
+            stripe_payment_intent_id=stripe_payment_intent_id,
+            invoice_number=invoice_data.get("number", ""),
+            status="paid",
+            amount_due=invoice_data.get("amount_due", 0) / 100,
+            amount_paid=invoice_data.get("amount_paid", 0) / 100,
+            currency=invoice_data.get("currency", "eur"),
+            period_start=timezone.datetime.fromtimestamp(
+                invoice_data["period_start"],
+                tz=timezone.utc,
+            ),
+            period_end=timezone.datetime.fromtimestamp(
+                invoice_data["period_end"],
+                tz=timezone.utc,
+            ),
+            invoice_pdf=invoice_data.get("invoice_pdf", ""),
+            hosted_invoice_url=invoice_data.get("hosted_invoice_url", ""),
         )
 
+        # Mettre à jour la sponsorisation (ancien système)
+        try:
+            sponso = Sponsorisation.objects.get(subscription_id=stripe_subscription_id)
+            # Prolonger la date de fin
+            if sponso.date_fin:
+                sponso.date_fin += timezone.timedelta(days=30)
+            else:
+                sponso.date_fin = timezone.now() + timezone.timedelta(days=30)
+            sponso.statut_paiement = "paid"
+            sponso.save(update_fields=["date_fin", "statut_paiement", "updated_at"])
+        except Sponsorisation.DoesNotExist:
+            pass
 
-def _handle_subscription_deleted(subscription):
+        logger.info(f"Paiement réussi: Subscription {subscription.id}, Invoice créée")
+
+    except Subscription.DoesNotExist:
+        logger.warning(f"Subscription introuvable pour {stripe_subscription_id}")
+    except Exception as e:
+        logger.exception(f"Erreur payment succeeded: {e}")
+
+
+def _handle_payment_failed(invoice_data):
+
+    try:
+        # Mettre à jour la subscription Django
+        subscription = Subscription.objects.get(stripe_subscription_id=stripe_subscription_id)
+        subscription.status = "past_due"
+        subscription.save(update_fields=["status", "updated_at"])
+
+        # Créer la facture avec statut "open" (non payée)
+        Invoice.objects.create(
+            subscription=subscription,
+            entreprise=subscription.entreprise,
+            stripe_invoice_id=stripe_invoice_id,
+            invoice_number=invoice_data.get("number", ""),
+            status="open",
+            amount_due=invoice_data.get("amount_due", 0) / 100,
+            amount_paid=0,
+            currency=invoice_data.get("currency", "eur"),
+            period_start=timezone.datetime.fromtimestamp(
+                invoice_data["period_start"],
+                tz=timezone.utc,
+            ),
+            period_end=timezone.datetime.fromtimestamp(
+                invoice_data["period_end"],
+                tz=timezone.utc,
+            ),
+            due_date=timezone.datetime.fromtimestamp(
+                invoice_data.get("due_date", invoice_data["period_end"]),
+                tz=timezone.utc,
+            ) if invoice_data.get("due_date") else None,
+            hosted_invoice_url=invoice_data.get("hosted_invoice_url", ""),
+        )
+
+        # Mettre à jour sponsorisation (ancien système)
+        try:
+            sponso = Sponsorisation.objects.get(subscription_id=stripe_subscription_id)
+            sponso.statut_paiement = "past_due"
+            # On ne désactive pas immédiatement, délai de grâce
+            sponso.save(update_fields=["statut_paiement", "updated_at"])
+        except Sponsorisation.DoesNotExist:
+            pass
+
+        logger.warning(f"Paiement échoué: Subscription {subscription.id}")
+
+    except Subscription.DoesNotExist:
+        logger.warning(f"Subscription introuvable pour {stripe_subscription_id}")
+    except Exception as e:
+        logger.exception(f"Erreur payment failed: {e}")
+
+
+def _handle_subscription_deleted(subscription_data):
     """Gère l'annulation de l'abonnement: désactive la sponsorisation."""
-    subscription_id = subscription.get("id")
+    stripe_subscription_id = subscription_data.get("id")
 
     try:
-        sponso = Sponsorisation.objects.get(subscription_id=subscription_id)
-        sponso.statut_paiement = "canceled"
-        sponso.is_active = False
-        sponso.save()
+        # Mettre à jour la subscription Django
+        subscription = Subscription.objects.get(stripe_subscription_id=stripe_subscription_id)
+        subscription.status = "canceled"
+        subscription.cancel_at_period_end = False
+        subscription.canceled_at = timezone.now()
+        subscription.ended_at = timezone.now()
+        subscription.save(update_fields=[
+            "status",
+            "cancel_at_period_end",
+            "canceled_at",
+            "ended_at",
+            "updated_at",
+        ])
 
-        logger.info(f"Abonnement annulé pour sponsorisation {sponso.id}")
+        # Mettre à jour sponsorisation (ancien système)
+        try:
+            sponso = Sponsorisation.objects.get(subscription_id=stripe_subscription_id)
+            sponso.statut_paiement = "canceled"
+            sponso.is_active = False
+            sponso.save(update_fields=["statut_paiement", "is_active", "updated_at"])
+        except Sponsorisation.DoesNotExist:
+            pass
 
-    except Sponsorisation.DoesNotExist:
-        logger.warning(
-            f"Sponsorisation introuvable pour subscription {subscription_id}",
-        )
+        logger.info(f"Abonnement annulé: Subscription {subscription.id}")
+
+    except Subscription.DoesNotExist:
+        logger.warning(f"Subscription introuvable pour {stripe_subscription_id}")
+    except Exception as e:
+        logger.exception(f"Erreur subscription deleted: {e}")

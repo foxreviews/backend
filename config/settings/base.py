@@ -125,6 +125,7 @@ LOCAL_APPS = [
     "foxreviews.enterprise",
     "foxreviews.reviews",
     "foxreviews.sponsorisation",
+    "foxreviews.billing",  # Facturation et abonnements
     # Your stuff: custom apps go here
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps

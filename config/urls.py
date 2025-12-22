@@ -39,6 +39,11 @@ urlpatterns += [
     path("api/", include("config.api_router")),
     # Core API endpoints
     path("api/", include("foxreviews.core.urls")),
+    # Auth & Account
+    path("api/auth/", include("foxreviews.users.api.urls")),
+    path("api/account/", include("foxreviews.users.api.urls")),
+    # Billing & Tracking
+    path("api/billing/", include("foxreviews.billing.urls")),
     # DRF auth token
     path("api/auth-token/", obtain_auth_token, name="obtain_auth_token"),
     path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),

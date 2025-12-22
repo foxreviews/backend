@@ -263,3 +263,46 @@ class IsPublicReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         # Lecture seule pour TOUS (même anonymes)
         return request.method in permissions.SAFE_METHODS
+
+
+class CanAccessBilling(permissions.BasePermission):
+    """
+    Permission: accès aux données de facturation.
+    Admin ou client propriétaire uniquement.
+    """
+
+    def has_permission(self, request, view):
+        """Vérifier permission globale."""
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if not hasattr(request.user, "profile"):
+            return False
+
+        profile = request.user.profile
+        
+        # Admin ou client avec entreprise
+        return profile.role in ["admin", "client"] and (
+            profile.role == "admin" or profile.entreprise is not None
+        )
+
+    def has_object_permission(self, request, view, obj):
+        """Vérifier si l'utilisateur peut accéder à cette facture/abonnement."""
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if not hasattr(request.user, "profile"):
+            return False
+
+        profile = request.user.profile
+        
+        # Admin peut tout voir
+        if profile.role == "admin":
+            return True
+
+        # Client peut voir ses propres données
+        if hasattr(obj, "entreprise") and profile.entreprise:
+            return obj.entreprise == profile.entreprise
+
+        return False
+

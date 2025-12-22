@@ -1,7 +1,14 @@
 import logging
+from datetime import timedelta
 
 from django.contrib import admin
 from django.contrib import messages
+from django.db.models import Count
+from django.db.models import Q
+from django.db.models import Sum
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.html import format_html
 
 from foxreviews.core.ai_request_service import AIRequestService
 from foxreviews.enterprise.models import Entreprise
@@ -12,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @admin.register(Entreprise)
 class EntrepriseAdmin(admin.ModelAdmin):
-    """Admin pour Entreprise."""
+    """Admin pour Entreprise avec KPIs."""
 
     list_display = [
         "nom",
@@ -20,6 +27,9 @@ class EntrepriseAdmin(admin.ModelAdmin):
         "siret",
         "ville_nom",
         "code_postal",
+        "subscription_badge",
+        "total_clicks_30d",
+        "total_views_30d",
         "is_active",
         "created_at",
     ]
@@ -33,7 +43,234 @@ class EntrepriseAdmin(admin.ModelAdmin):
         "naf_libelle",
     ]
     ordering = ["nom"]
-    readonly_fields = ["created_at", "updated_at"]
+    readonly_fields = [
+        "created_at",
+        "updated_at",
+        "kpi_subscription",
+        "kpi_clicks_total",
+        "kpi_clicks_30d",
+        "kpi_views_total",
+        "kpi_views_30d",
+        "kpi_ctr_30d",
+    ]
+    
+    fieldsets = [
+        (
+            "Informations générales",
+            {
+                "fields": [
+                    "siren",
+                    "siret",
+                    "nom",
+                    "nom_commercial",
+                    "is_active",
+                ],
+            },
+        ),
+        (
+            "Adresse",
+            {
+                "fields": [
+                    "adresse",
+                    "code_postal",
+                    "ville_nom",
+                ],
+            },
+        ),
+        (
+            "NAF",
+            {
+                "fields": [
+                    "naf_code",
+                    "naf_libelle",
+                ],
+            },
+        ),
+        (
+            "Contact",
+            {
+                "fields": [
+                    "telephone",
+                    "email_contact",
+                    "site_web",
+                ],
+            },
+        ),
+        (
+            "📊 KPIs & Statistiques",
+            {
+                "fields": [
+                    "kpi_subscription",
+                    "kpi_clicks_total",
+                    "kpi_clicks_30d",
+                    "kpi_views_total",
+                    "kpi_views_30d",
+                    "kpi_ctr_30d",
+                ],
+                "classes": ["wide"],
+            },
+        ),
+        (
+            "Métadonnées",
+            {
+                "fields": [
+                    "created_at",
+                    "updated_at",
+                ],
+                "classes": ["collapse"],
+            },
+        ),
+    ]
+
+    def subscription_badge(self, obj):
+        """Badge abonnement actif."""
+        from foxreviews.billing.models import Subscription
+        
+        active_sub = Subscription.objects.filter(
+            entreprise=obj,
+            status__in=["active", "trialing"],
+        ).first()
+        
+        if active_sub:
+            return format_html(
+                '<span style="background-color: green; color: white; padding: 3px 8px; border-radius: 3px;">✓ ACTIF</span>'
+            )
+        return format_html(
+            '<span style="background-color: gray; color: white; padding: 3px 8px; border-radius: 3px;">AUCUN</span>'
+        )
+    subscription_badge.short_description = "Abonnement"
+
+    def total_clicks_30d(self, obj):
+        """Clics 30 derniers jours."""
+        from foxreviews.billing.models import ClickEvent
+        
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        count = ClickEvent.objects.filter(
+            entreprise=obj,
+            timestamp__gte=thirty_days_ago,
+        ).count()
+        return count
+    total_clicks_30d.short_description = "Clics (30j)"
+
+    def total_views_30d(self, obj):
+        """Vues 30 derniers jours."""
+        from foxreviews.billing.models import ViewEvent
+        
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        count = ViewEvent.objects.filter(
+            entreprise=obj,
+            timestamp__gte=thirty_days_ago,
+        ).count()
+        return count
+    total_views_30d.short_description = "Vues (30j)"
+
+    # KPIs readonly fields
+    def kpi_subscription(self, obj):
+        """KPI: Abonnement actif."""
+        from foxreviews.billing.models import Subscription
+        
+        active_sub = Subscription.objects.filter(
+            entreprise=obj,
+            status__in=["active", "trialing"],
+        ).select_related("pro_localisation").first()
+        
+        if active_sub:
+            info = f"""
+            <div style="padding: 10px; background: #e8f5e9; border-left: 4px solid #4caf50;">
+                <strong>Abonnement ACTIF</strong><br>
+                Statut: {active_sub.get_status_display()}<br>
+                Montant: {active_sub.amount} {active_sub.currency.upper()}/mois<br>
+                Fin période: {active_sub.current_period_end.strftime('%d/%m/%Y')}<br>
+                Stripe ID: {active_sub.stripe_subscription_id}
+            </div>
+            """
+            return format_html(info)
+        return format_html(
+            '<div style="padding: 10px; background: #fff3e0; border-left: 4px solid #ff9800;">Aucun abonnement actif</div>'
+        )
+    kpi_subscription.short_description = "📋 Abonnement"
+
+    def kpi_clicks_total(self, obj):
+        """KPI: Total clics."""
+        from foxreviews.billing.models import ClickEvent
+        
+        total = ClickEvent.objects.filter(entreprise=obj).count()
+        return format_html('<strong style="font-size: 18px; color: #2196F3;">{}</strong>', total)
+    kpi_clicks_total.short_description = "🖱️ Clics (total)"
+
+    def kpi_clicks_30d(self, obj):
+        """KPI: Clics 30 derniers jours."""
+        from foxreviews.billing.models import ClickEvent
+        
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        count = ClickEvent.objects.filter(
+            entreprise=obj,
+            timestamp__gte=thirty_days_ago,
+        ).count()
+        
+        # Breakdown par source
+        by_source = ClickEvent.objects.filter(
+            entreprise=obj,
+            timestamp__gte=thirty_days_ago,
+        ).values("source").annotate(count=Count("id")).order_by("-count")
+        
+        breakdown = "<br>".join([f"{item['source']}: {item['count']}" for item in by_source[:5]])
+        
+        return format_html(
+            '<strong style="font-size: 18px; color: #2196F3;">{}</strong><br><small>{}</small>',
+            count,
+            breakdown or "Aucun clic",
+        )
+    kpi_clicks_30d.short_description = "🖱️ Clics (30 derniers jours)"
+
+    def kpi_views_total(self, obj):
+        """KPI: Total vues."""
+        from foxreviews.billing.models import ViewEvent
+        
+        total = ViewEvent.objects.filter(entreprise=obj).count()
+        return format_html('<strong style="font-size: 18px; color: #4CAF50;">{}</strong>', total)
+    kpi_views_total.short_description = "👁️ Vues (total)"
+
+    def kpi_views_30d(self, obj):
+        """KPI: Vues 30 derniers jours."""
+        from foxreviews.billing.models import ViewEvent
+        
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        count = ViewEvent.objects.filter(
+            entreprise=obj,
+            timestamp__gte=thirty_days_ago,
+        ).count()
+        return format_html('<strong style="font-size: 18px; color: #4CAF50;">{}</strong>', count)
+    kpi_views_30d.short_description = "👁️ Vues (30 derniers jours)"
+
+    def kpi_ctr_30d(self, obj):
+        """KPI: CTR 30 derniers jours."""
+        from foxreviews.billing.models import ClickEvent, ViewEvent
+        
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        
+        clicks = ClickEvent.objects.filter(
+            entreprise=obj,
+            timestamp__gte=thirty_days_ago,
+        ).count()
+        
+        views = ViewEvent.objects.filter(
+            entreprise=obj,
+            timestamp__gte=thirty_days_ago,
+        ).count()
+        
+        ctr = (clicks / views * 100) if views > 0 else 0
+        
+        color = "green" if ctr > 5 else "orange" if ctr > 2 else "red"
+        
+        return format_html(
+            '<strong style="font-size: 18px; color: {};">{:.2f}%</strong><br><small>{} clics / {} vues</small>',
+            color,
+            ctr,
+            clicks,
+            views,
+        )
+    kpi_ctr_30d.short_description = "📈 CTR (30 derniers jours)"
 
 
 @admin.register(ProLocalisation)
