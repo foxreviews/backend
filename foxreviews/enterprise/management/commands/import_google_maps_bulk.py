@@ -52,14 +52,26 @@ class Command(BaseCommand):
             "--match-by",
             type=str,
             default="name_address",
-            choices=["name_address", "phone", "place_id", "create_all"],
-            help="Stratégie de matching: name_address (nom+adresse), phone, place_id, ou create_all (créer toutes)",
+            choices=["name_address", "phone", "place_id"],
+            help="Stratégie de matching: name_address (nom+adresse), phone, ou place_id",
         )
         parser.add_argument(
             "--update-existing",
             action="store_true",
             default=True,
             help="Mettre à jour les champs vides des entreprises existantes (défaut: True)",
+        )
+        parser.add_argument(
+            "--no-create",
+            action="store_true",
+            default=False,
+            help="Ne jamais créer de nouvelles entreprises, uniquement enrichir les existantes",
+        )
+        parser.add_argument(
+            "--create-with-temp-siren",
+            action="store_true",
+            default=True,
+            help="Créer les entreprises manquantes avec SIREN temporaire (défaut: True)",
         )
 
     def _should_update_field(self, existing_value, new_value):
@@ -224,6 +236,8 @@ class Command(BaseCommand):
         dry_run = options["dry_run"]
         match_by = options["match_by"]
         update_existing = options["update_existing"]
+        no_create = options["no_create"]
+        create_with_temp_siren = options["create_with_temp_siren"]
 
         # Configuration CSV pour gros fichiers
         csv.field_size_limit(sys.maxsize)
@@ -232,6 +246,18 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("🚀 IMPORT GOOGLE MAPS - Configuration"))
         self.stdout.write("=" * 70)
         self.stdout.write(f"📁 Fichier: {csv_file}")
+        self.stdout.write(f"📦 Batch size: {batch_size:,}")
+        self.stdout.write(f"🔧 Chunk size: {chunk_size:,} bytes")
+        self.stdout.write(f"🔍 Matching: {match_by}")
+        self.stdout.write(f"🔄 Update existing: {update_existing}")
+        self.stdout.write(f"🚫 No create: {no_create}")
+        self.stdout.write(f"🆕 Create with temp SIREN: {create_with_temp_siren}")
+        if no_create:
+            self.stdout.write(self.style.WARNING("⚠️  MODE ENRICHISSEMENT UNIQUEMENT (pas de création)"))
+        elif create_with_temp_siren:
+            self.stdout.write(self.style.SUCCESS("✅ CRÉATION ACTIVÉE avec SIRENs temporaires"))
+        if max_rows:
+            self.stdout.write(f"⚠️  Limite: {max_rows:,} lignes")
         self.stdout.write(f"📦 Batch size: {batch_size:,}")
         self.stdout.write(f"🔧 Chunk size: {chunk_size:,} bytes")
         self.stdout.write(f"🔍 Matching: {match_by}")
@@ -265,31 +291,28 @@ class Command(BaseCommand):
                 self.stdout.write(f"✅ Colonnes détectées: {len(reader.fieldnames)}")
                 
                 # Préparation
-                if match_by != "create_all":
-                    self.stdout.write("📊 Chargement des entreprises existantes...")
-                    if match_by == "place_id":
-                        existing_map = {
-                            e.google_place_id: e
-                            for e in Entreprise.objects.exclude(google_place_id="")
-                        }
-                    elif match_by == "phone":
-                        existing_map = {
-                            e.telephone: e
-                            for e in Entreprise.objects.exclude(telephone="")
-                        }
-                    else:  # name_address
-                        existing_map = {
-                            f"{e.nom}|{e.code_postal}": e
-                            for e in Entreprise.objects.all()
-                        }
-                    self.stdout.write(f"✅ {len(existing_map):,} entreprises en mémoire")
-                else:
-                    existing_map = {}
+                self.stdout.write("📊 Chargement des entreprises existantes...")
+                if match_by == "place_id":
+                    existing_map = {
+                        e.google_place_id: e
+                        for e in Entreprise.objects.exclude(google_place_id="")
+                    }
+                elif match_by == "phone":
+                    existing_map = {
+                        e.telephone: e
+                        for e in Entreprise.objects.exclude(telephone="")
+                    }
+                else:  # name_address
+                    existing_map = {
+                        f"{e.nom}|{e.code_postal}": e
+                        for e in Entreprise.objects.all()
+                    }
+                self.stdout.write(f"✅ {len(existing_map):,} entreprises en mémoire")
                 
                 batch_create = []
                 batch_update_map = {}
                 last_progress_time = time.time()
-                siren_counter = 900000000  # Début SIREN factices
+                siren_counter = 900000000  # Début SIRENs temporaires
                 
                 for idx, row in enumerate(reader):
                     if idx < skip_rows:
@@ -320,8 +343,8 @@ class Command(BaseCommand):
                                 "entreprise": existing_entreprise,
                                 "data": mapped_data,
                             }
-                        elif not existing_entreprise:
-                            # Créer nouvelle entreprise
+                        elif not existing_entreprise and not no_create and create_with_temp_siren:
+                            # Créer nouvelle entreprise avec SIREN temporaire
                             siren_counter += 1
                             siren = self._generate_siren(
                                 mapped_data["nom"],
@@ -331,6 +354,8 @@ class Command(BaseCommand):
                             
                             entreprise = Entreprise(
                                 siren=siren,
+                                siren_temporaire=True,  # SIREN temporaire !
+                                enrichi_insee=False,
                                 nom=mapped_data["nom"],
                                 adresse=mapped_data["adresse"],
                                 code_postal=mapped_data["code_postal"] or "00000",
@@ -366,7 +391,7 @@ class Command(BaseCommand):
                                 Entreprise.objects.bulk_create(
                                     batch_create,
                                     batch_size=batch_size,
-                                    ignore_conflicts=False,
+                                    ignore_conflicts=True,  # Ignorer si collision SIREN
                                 )
                                 total_created += len(batch_create)
                             except Exception as e:
@@ -426,7 +451,7 @@ class Command(BaseCommand):
                         Entreprise.objects.bulk_create(
                             batch_create,
                             batch_size=batch_size,
-                            ignore_conflicts=False,
+                            ignore_conflicts=True,
                         )
                         total_created += len(batch_create)
                     except Exception as e:
@@ -496,6 +521,8 @@ class Command(BaseCommand):
         
         if not dry_run:
             total_db = Entreprise.objects.count()
+            total_temp_siren = Entreprise.objects.filter(siren_temporaire=True).count()
             self.stdout.write(f"💾 Total DB:     {total_db:>10,} entreprises")
+            self.stdout.write(f"⏳ SIREN temp:   {total_temp_siren:>10,} entreprises (à enrichir via INSEE)")
         
         self.stdout.write("=" * 70)

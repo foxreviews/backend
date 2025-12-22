@@ -22,6 +22,16 @@ class Entreprise(BaseModel):
         db_index=True,
         help_text=_("Numéro SIREN (9 chiffres)"),
     )
+    siren_temporaire = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text=_("SIREN temporaire en attente d'enrichissement INSEE"),
+    )
+    enrichi_insee = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text=_("Données enrichies via API INSEE"),
+    )
     siret = models.CharField(
         max_length=14,
         null=True,
@@ -124,6 +134,7 @@ class Entreprise(BaseModel):
             models.Index(fields=["naf_code"]),
             models.Index(fields=["google_place_id"]),
             models.Index(fields=["latitude", "longitude"]),
+            models.Index(fields=["siren_temporaire", "enrichi_insee"]),
         ]
 
     def __str__(self):

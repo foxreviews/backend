@@ -129,7 +129,9 @@ class Command(BaseCommand):
         Détermine si un champ doit être mis à jour.
         Update si le champ existant est vide/None et que la nouvelle valeur existe.
         """
-        if not new_value or new_value.strip() == '':
+        if new_value is None:
+            return False
+        if isinstance(new_value, str) and new_value.strip() == '':
             return False
         if existing_value is None or existing_value == '':
             return True
@@ -150,6 +152,12 @@ class Command(BaseCommand):
             'telephone': ('telephone', lambda v: v.strip()[:20]),
             'email_contact': ('email', lambda v: v.strip()[:254]),
             'site_web': ('site_web', lambda v: v.strip()[:200]),
+            'domain': ('domain', lambda v: v.strip()[:255]),
+            'logo': ('logo', lambda v: v.strip()[:200]),
+            'main_image': ('main_image', lambda v: v.strip()[:200]),
+            'nom_proprietaire': ('nom_proprietaire', lambda v: v.strip()[:255]),
+            'google_place_id': ('google_place_id', lambda v: v.strip()[:255]),
+            'original_title': ('original_title', lambda v: v.strip()[:255]),
         }
         
         for field_name, (csv_col, transform) in field_mappings.items():
@@ -160,6 +168,29 @@ class Command(BaseCommand):
                 
                 if self._should_update_field(current_value, transformed_value):
                     setattr(entreprise, field_name, transformed_value)
+                    updated = True
+        
+        # Gérer les champs décimaux (latitude, longitude)
+        for decimal_field, csv_col in [('latitude', 'latitude'), ('longitude', 'longitude')]:
+            csv_value = row.get(csv_col, '')
+            if csv_value:
+                try:
+                    decimal_value = float(csv_value.strip())
+                    current_value = getattr(entreprise, decimal_field, None)
+                    if current_value is None:
+                        setattr(entreprise, decimal_field, decimal_value)
+                        updated = True
+                except (ValueError, AttributeError):
+                    pass
+        
+        # Gérer les champs booléens
+        for bool_field, csv_col in [('enrichi_insee', 'enrichi_insee'), ('siren_temporaire', 'siren_temporaire')]:
+            csv_value = row.get(csv_col, '')
+            if csv_value:
+                bool_value = csv_value.strip().lower() in ['true', '1', 'yes', 'oui']
+                current_value = getattr(entreprise, bool_field, None)
+                if current_value != bool_value:
+                    setattr(entreprise, bool_field, bool_value)
                     updated = True
         
         return updated
@@ -220,6 +251,7 @@ class Command(BaseCommand):
         batch_update = []
         siren_to_row = {}  # Map SIREN -> row data pour update
         
+        total_imported = 0
         total_created = 0
         total_updated = 0
         total_skipped = 0
@@ -264,9 +296,12 @@ class Command(BaseCommand):
                             self.stdout.write(f"⏭️ Skipping... {idx:,}/{skip_rows:,}")
                         continue
 
-                    # Limite max_rows
+                    # Limite max_rows (sur lignes effectivement traitées)
                     if max_rows and total_imported >= max_rows:
                         break
+
+                    # Compter la ligne comme traitée (import tenttive)
+                    total_imported += 1
 
                     # Valider données obligatoires (rapide)
                     siren = row.get("siren", "").strip()
@@ -295,6 +330,21 @@ class Command(BaseCommand):
                             continue
 
                     try:
+                        # Préparer les champs décimaux
+                        latitude = None
+                        longitude = None
+                        try:
+                            if row.get("latitude", "").strip():
+                                latitude = float(row.get("latitude", "").strip())
+                            if row.get("longitude", "").strip():
+                                longitude = float(row.get("longitude", "").strip())
+                        except (ValueError, AttributeError):
+                            pass
+                        
+                        # Préparer les champs booléens
+                        enrichi_insee = row.get("enrichi_insee", "").strip().lower() in ['true', '1', 'yes', 'oui']
+                        siren_temporaire = row.get("siren_temporaire", "").strip().lower() in ['true', '1', 'yes', 'oui']
+                        
                         # Créer instance (sans save) - nouvelle entreprise
                         entreprise = Entreprise(
                             siren=siren,
@@ -309,6 +359,16 @@ class Command(BaseCommand):
                             telephone=row.get("telephone", "").strip()[:20],
                             email_contact=row.get("email", "").strip()[:254],
                             site_web=row.get("site_web", "").strip()[:200],
+                            domain=row.get("domain", "").strip()[:255],
+                            latitude=latitude,
+                            longitude=longitude,
+                            logo=row.get("logo", "").strip()[:200],
+                            main_image=row.get("main_image", "").strip()[:200],
+                            nom_proprietaire=row.get("nom_proprietaire", "").strip()[:255],
+                            google_place_id=row.get("google_place_id", "").strip()[:255],
+                            original_title=row.get("original_title", "").strip()[:255],
+                            enrichi_insee=enrichi_insee,
+                            siren_temporaire=siren_temporaire,
                             is_active=True,
                         )
                         batch_create.append(entreprise)
@@ -368,7 +428,11 @@ class Command(BaseCommand):
                                         entreprises_modified,
                                         [
                                             'siret', 'nom_commercial', 'naf_libelle',
-                                            'telephone', 'email_contact', 'site_web', 'updated_at'
+                                            'telephone', 'email_contact', 'site_web',
+                                            'domain', 'latitude', 'longitude', 'logo',
+                                            'main_image', 'nom_proprietaire', 'google_place_id',
+                                            'original_title', 'enrichi_insee', 'siren_temporaire',
+                                            'updated_at'
                                         ],
                                         batch_size=batch_size,
                                     )
@@ -453,7 +517,11 @@ class Command(BaseCommand):
                                 entreprises_modified,
                                 [
                                     'siret', 'nom_commercial', 'naf_libelle',
-                                    'telephone', 'email_contact', 'site_web', 'updated_at'
+                                    'telephone', 'email_contact', 'site_web',
+                                    'domain', 'latitude', 'longitude', 'logo',
+                                    'main_image', 'nom_proprietaire', 'google_place_id',
+                                    'original_title', 'enrichi_insee', 'siren_temporaire',
+                                    'updated_at'
                                 ],
                                 batch_size=batch_size,
                             )
