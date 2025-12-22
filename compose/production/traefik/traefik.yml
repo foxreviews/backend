@@ -30,6 +30,17 @@ certificatesResolvers:
 
 http:
   routers:
+    api-secure-router:
+      rule: 'Host(`api.foxreviews.com`)'
+      entryPoints:
+        - web-secure
+      middlewares:
+        - csrf
+      service: django
+      tls:
+        # https://doc.traefik.io/traefik/routing/routers/#certresolver
+        certResolver: letsencrypt
+
     web-secure-router:
       rule: 'Host(`fox-reviews.com`) || Host(`www.fox-reviews.com`)'
       entryPoints:
@@ -42,7 +53,7 @@ http:
         certResolver: letsencrypt
 
     flower-secure-router:
-      rule: 'Host(`fox-reviews.com`)'
+      rule: 'Host(`api.foxreviews.com`)'
       entryPoints:
         - flower
       service: flower

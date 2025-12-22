@@ -56,6 +56,56 @@ class Entreprise(BaseModel):
     telephone = models.CharField(max_length=20, blank=True)
     email_contact = models.EmailField(blank=True)
     site_web = models.URLField(blank=True)
+    
+    # Données Google Maps / Enrichissement
+    domain = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Nom de domaine (ex: exemple.fr)"),
+    )
+    latitude = models.DecimalField(
+        max_digits=10,
+        decimal_places=7,
+        null=True,
+        blank=True,
+        help_text=_("Latitude GPS"),
+    )
+    longitude = models.DecimalField(
+        max_digits=10,
+        decimal_places=7,
+        null=True,
+        blank=True,
+        help_text=_("Longitude GPS"),
+    )
+    logo = models.URLField(
+        blank=True,
+        help_text=_("URL du logo de l'entreprise"),
+    )
+    main_image = models.URLField(
+        blank=True,
+        help_text=_("URL de l'image principale"),
+    )
+    nom_proprietaire = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Nom du propriétaire/gérant"),
+    )
+    contacts = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=_("Données de contact supplémentaires (JSON)"),
+    )
+    google_place_id = models.CharField(
+        max_length=255,
+        blank=True,
+        db_index=True,
+        help_text=_("Google Place ID"),
+    )
+    original_title = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Titre original Google Maps"),
+    )
 
     # Statut
     is_active = models.BooleanField(
@@ -72,6 +122,8 @@ class Entreprise(BaseModel):
             models.Index(fields=["siren", "is_active"]),
             models.Index(fields=["ville_nom", "code_postal"]),
             models.Index(fields=["naf_code"]),
+            models.Index(fields=["google_place_id"]),
+            models.Index(fields=["latitude", "longitude"]),
         ]
 
     def __str__(self):

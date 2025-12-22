@@ -46,6 +46,13 @@ services:
       - '0.0.0.0:80:80'
       - '0.0.0.0:443:443'
       - '0.0.0.0:5555:5555'
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api-http.rule=Host(`api.foxreviews.com`)"
+      - "traefik.http.routers.api-http.entrypoints=web"
+      - "traefik.http.routers.api-https.rule=Host(`api.foxreviews.com`)"
+      - "traefik.http.routers.api-https.entrypoints=web-secure"
+      - "traefik.http.routers.api-https.tls.certresolver=letsencrypt"
 
   redis:
     image: docker.io/redis:7.2
