@@ -1,0 +1,140 @@
+version: "3.8"
+
+# Production-safe compose for the IA Agent, designed to co-exist with FOXReviews + Traefik on the same host.
+# Key goals:
+# - No public port conflicts with Traefik (80/443)
+# - Agent API reachable from FOXReviews via the shared docker network: foxreviews_shared
+# - No dev-only flags (no --reload)
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: agent_postgres
+    environment:
+      POSTGRES_USER: agent_user
+      POSTGRES_PASSWORD: agent_pass
+      POSTGRES_DB: agent_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: agent_redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: agent_ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=10m
+      - OLLAMA_MAX_LOADED_MODELS=2
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Keep this name to match FOXReviews default AI_SERVICE_URL=http://agent_app_local:8000
+    container_name: agent_app_local
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info
+    # No public port required for FOXReviews (Docker DNS via foxreviews_shared).
+    # If you want a host-local debug access, uncomment the next lines:
+    # ports:
+    #   - "127.0.0.1:8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./ml:/app/ml
+      - ./data:/app/data
+      - app_logs:/var/log/app
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://agent_user:agent_pass@postgres:5432/agent_db
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3:8b}
+      - OLLAMA_MAX_TOKENS=2048
+      - OLLAMA_MAX_CONCURRENT=${OLLAMA_MAX_CONCURRENT:-4}
+      - LOG_LEVEL=INFO
+      - DB_POOL_SIZE=20
+      - DB_MAX_OVERFLOW=40
+      - REDIS_POOL_SIZE=50
+      - MAX_CONCURRENT_REQUESTS=200
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - default
+      - foxreviews_shared
+    restart: unless-stopped
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent_celery_worker
+    command: celery -A app.worker worker --loglevel=info --concurrency=4 --max-tasks-per-child=1000
+    volumes:
+      - ./app:/app/app
+      - ./ml:/app/ml
+      - ./data:/app/data
+      - worker_logs:/var/log/app
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://agent_user:agent_pass@postgres:5432/agent_db
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3:8b}
+      - OLLAMA_MAX_TOKENS=2048
+      - OLLAMA_MAX_CONCURRENT=${OLLAMA_MAX_CONCURRENT:-4}
+      - LOG_LEVEL=INFO
+      - C_FORCE_ROOT=true
+    depends_on:
+      - redis
+      - postgres
+      - ollama
+    networks:
+      - default
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+  app_logs:
+  worker_logs:
+
+networks:
+  foxreviews_shared:
+    external: true

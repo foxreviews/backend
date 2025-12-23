@@ -20,7 +20,7 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "135.125.74.206",
     "fox-reviews.com",
-    "api.foxreviews.com",
+    "api.fox-reviews.com",
 ]  # noqa: S104
 
 # CORS

@@ -38,5 +38,5 @@ class AvisDecrypteViewSet(CRUDViewSet):
         "needs_regeneration",
     ]
     search_fields = ["texte_brut", "texte_decrypte"]
-    ordering_fields = ["date_generation", "confidence_score", "created_at"]
+    ordering_fields = ["date_generation", "created_at"]
     ordering = ["-date_generation"]

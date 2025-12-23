@@ -15,9 +15,8 @@ Usage:
     python manage.py manage_naf_mapping --show-unmapped
 """
 
-from collections import Counter
-
 from django.core.management.base import BaseCommand
+from django.db.models import Count
 
 from foxreviews.enterprise.models import Entreprise
 from foxreviews.subcategory.models import SousCategorie
@@ -173,17 +172,17 @@ class Command(BaseCommand):
         )
         self.stdout.write("=" * 60)
 
-        # Récupérer tous les codes NAF uniques
-        naf_codes = (
-            Entreprise.objects.values_list("naf_code", flat=True)
-            .distinct()
-            .order_by("naf_code")
+        naf_aggregates = (
+            Entreprise.objects.values("naf_code")
+            .annotate(count=Count("id"))
+            .order_by("-count")
         )
 
         unmapped = []
-        for naf_code in naf_codes:
+        for row in naf_aggregates.iterator(chunk_size=2000):
+            naf_code = row["naf_code"]
+            count = row["count"]
             if not get_subcategory_from_naf(naf_code):
-                count = Entreprise.objects.filter(naf_code=naf_code).count()
                 unmapped.append((naf_code, count))
 
         if not unmapped:
@@ -191,9 +190,6 @@ class Command(BaseCommand):
                 self.style.SUCCESS("✅ Tous les codes NAF ont un mapping")
             )
             return
-
-        # Trier par nombre d'entreprises (décroissant)
-        unmapped.sort(key=lambda x: x[1], reverse=True)
 
         self.stdout.write(
             f"\n{len(unmapped)} codes NAF sans mapping:\n"
@@ -229,20 +225,25 @@ class Command(BaseCommand):
             return
 
         # Codes NAF uniques
-        naf_codes = Entreprise.objects.values_list("naf_code", flat=True).distinct()
-        total_naf = len(naf_codes)
+        total_naf = Entreprise.objects.values("naf_code").distinct().count()
         self.stdout.write(f"Codes NAF uniques: {total_naf}")
 
-        # Codes mappés
+        # Codes mappés + entreprises mappées (sans N+1 queries)
         mapped_count = 0
         mapped_entreprises = 0
-        
-        for naf_code in naf_codes:
+
+        naf_aggregates = (
+            Entreprise.objects.values("naf_code")
+            .annotate(count=Count("id"))
+            .order_by()
+        )
+
+        for row in naf_aggregates.iterator(chunk_size=2000):
+            naf_code = row["naf_code"]
+            count = row["count"]
             if get_subcategory_from_naf(naf_code):
                 mapped_count += 1
-                mapped_entreprises += Entreprise.objects.filter(
-                    naf_code=naf_code
-                ).count()
+                mapped_entreprises += count
 
         self.stdout.write(f"\nCodes NAF mappés: {mapped_count}/{total_naf}")
         self.stdout.write(
@@ -252,13 +253,17 @@ class Command(BaseCommand):
 
         # Top 10 codes NAF
         self.stdout.write(self.style.SUCCESS("\n\n🏆 TOP 10 CODES NAF:\n"))
-        
-        naf_counter = Counter(
-            Entreprise.objects.values_list("naf_code", flat=True)
+
+        top10 = (
+            Entreprise.objects.values("naf_code")
+            .annotate(count=Count("id"))
+            .order_by("-count")[:10]
         )
-        
-        for naf_code, count in naf_counter.most_common(10):
-            entreprise = Entreprise.objects.filter(naf_code=naf_code).first()
+
+        for row in top10:
+            naf_code = row["naf_code"]
+            count = row["count"]
+            entreprise = Entreprise.objects.filter(naf_code=naf_code).only("naf_libelle").first()
             libelle = entreprise.naf_libelle if entreprise else "N/A"
             mapped = "✅" if get_subcategory_from_naf(naf_code) else "❌"
             

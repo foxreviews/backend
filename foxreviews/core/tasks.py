@@ -276,24 +276,43 @@ def retry_failed_items(item_type: str = None, limit: int = 100):
         try:
             # Marquer comme en cours de retry
             service.retry_failed_item(str(item.id))
-            
+
             # Retenter selon le type
-            if item.item_type == 'entreprise':
-                # Relancer l'import pour cet item
-                # TODO: implémenter retry spécifique
-                pass
-            elif item.item_type == 'prolocalisation':
-                # Relancer la création de ProLocalisation
-                # TODO: implémenter retry spécifique
-                pass
-            
-            # Marquer comme résolu si succès
+            if item.item_type in {"prolocalisation", "ai_job"}:
+                # Retry decryptage_avis: on re-enqueue start -> poll
+                from celery import chain
+
+                from foxreviews.reviews.tasks import poll_decryptage_avis_job
+                from foxreviews.reviews.tasks import start_decryptage_avis_job
+
+                # NB:
+                # - item_type='prolocalisation' => item_id = pro_localisation_id
+                # - item_type='ai_job'          => item_id = job_id, le pro_localisation_id est dans item_data
+                if item.item_type == "prolocalisation":
+                    pro_localisation_id = str(item.item_id)
+                else:
+                    pro_localisation_id = str((item.item_data or {}).get("pro_localisation_id") or "").strip()
+                    if not pro_localisation_id:
+                        raise ValueError(
+                            "retry_failed_items: missing pro_localisation_id in item_data for ai_job"
+                        )
+
+                angle = str((item.item_data or {}).get("angle") or "SEO")
+                queue = str((item.item_data or {}).get("queue") or "ai_generation")
+                poll_countdown = int((item.item_data or {}).get("poll_countdown") or 15)
+
+                chain(
+                    start_decryptage_avis_job.s(pro_localisation_id, angle, batch_id=str(item.batch_id)).set(queue=queue),
+                    poll_decryptage_avis_job.s(countdown_seconds=poll_countdown).set(queue=queue),
+                ).apply_async()
+
+            # Marquer comme résolu si on a pu replanifier
             service.mark_item_resolved(str(item.id))
-            stats['success'] += 1
-            
+            stats["success"] += 1
+
         except Exception as e:
             logger.exception(f"Erreur retry item {item.id}: {e}")
-            stats['failed'] += 1
+            stats["failed"] += 1
             continue
     
     logger.info(f"Retry terminé: {stats['success']} succès, {stats['failed']} échecs")

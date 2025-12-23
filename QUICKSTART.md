@@ -294,8 +294,53 @@ docker-compose -f docker-compose.production.yml up -d
 ```env
 DJANGO_SETTINGS_MODULE=config.settings.production
 DJANGO_DEBUG=False
-DJANGO_ALLOWED_HOSTS=your-domain.com
+DJANGO_ALLOWED_HOSTS=api.fox-reviews.com,fox-reviews.com,www.fox-reviews.com
+
+# CSRF / CORS (requis pour navigateur / docs / admin)
+DJANGO_CSRF_TRUSTED_ORIGINS=https://api.fox-reviews.com,https://fox-reviews.com,https://www.fox-reviews.com
+DJANGO_CORS_ALLOWED_ORIGINS=https://fox-reviews.com,https://www.fox-reviews.com
+
+# IA (le backend appelle le service IA)
+# En local, la valeur par défaut est: http://agent_app_local:8000
+# En production, faites tourner le conteneur IA sur le même réseau docker que l'app.
+AI_SERVICE_URL=http://agent_app_local:8000
+AI_SERVICE_TIMEOUT=180
+AI_SERVICE_API_KEY=your-ai-service-key
+
+# INSEE (API Sirene)
+INSEE_API_KEY=your-insee-api-key
+INSEE_TIMEOUT=30
+
 DJANGO_SECRET_KEY=your-production-secret-key
+```
+
+### IA: s'assurer que Docker peut joindre le service
+
+Le backend appelle l'IA via `AI_SERVICE_URL`. Le plus simple est d'utiliser un réseau docker partagé
+(`foxreviews_shared`) et de donner au conteneur IA le nom DNS `agent_app_local`.
+
+Si tu utilises le docker-compose de l'agent tel quel, il définit déjà `container_name: agent_app_local`
+et connecte le service `app` au réseau externe `foxreviews_shared`.
+
+⚠️ Attention si les 2 stacks tournent sur le même serveur:
+- Notre Traefik backend publie déjà `80`/`443` → ne publie pas `80:80` côté agent (nginx), sinon conflit.
+- Évite aussi de publier `5432:5432`, `6379:6379`, `11434:11434` côté agent si tu n'en as pas besoin depuis l'extérieur.
+- Le backend FOXReviews n'a besoin que d'accéder à `http://agent_app_local:8000` via le réseau docker.
+
+Template recommandé (prod-safe, sans nginx/ports publics inutiles):
+- Voir [docs/agent_docker-compose.production.safe.yml](docs/agent_docker-compose.production.safe.yml)
+
+### Monitoring (Prometheus / Grafana)
+
+Le backend expose un endpoint Prometheus: `https://api.fox-reviews.com/metrics`
+(activable via `PROMETHEUS_METRICS_ENABLED=True`).
+
+```bash
+# 1) créer le réseau (une fois)
+docker network create foxreviews_shared
+
+# 2) démarrer votre conteneur IA sur ce réseau avec le nom attendu
+docker run --name agent_app_local --network foxreviews_shared -p 8000:8000 <votre-image-ia>
 ```
 
 ---

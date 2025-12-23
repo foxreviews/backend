@@ -16,6 +16,8 @@ Usage:
     sous_cat = get_subcategory_from_naf("43.22A")  # Returns SousCategorie or None
 """
 
+import re
+
 from django.core.cache import cache
 
 # Mapping NAF → Slug de SousCategorie
@@ -61,8 +63,7 @@ NAF_TO_SUBCATEGORY = {
     "43.91B": "couvreur-zingueur",
     
     # === BÂTIMENT - CHAUFFAGE / CLIMATISATION ===
-    "43.22A": "chauffagiste",
-    "43.22B": "climatisation",
+    # 43.22A/43.22B déjà mappés ci-dessus (éviter doublons: la dernière valeur écrase la première)
     
     # === BÂTIMENT - AUTRES ===
     "43.32C": "serrurier",
@@ -129,6 +130,12 @@ def get_subcategory_from_naf(naf_code: str):
     
     # Normaliser le code NAF (enlever espaces, mettre en majuscules)
     naf_code = naf_code.strip().upper()
+
+    # Normalisation de format:
+    # - INSEE renvoie souvent sans point: 6201Z / 4322A
+    # - Notre mapping est majoritairement avec point: 62.01Z / 43.22A
+    if re.fullmatch(r"\d{4}[A-Z0-9]", naf_code):
+        naf_code = f"{naf_code[:2]}.{naf_code[2:]}"
     
     # Vérifier le cache d'abord
     cache_key = f"naf_mapping_{naf_code}"

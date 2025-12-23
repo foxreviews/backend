@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 
 from foxreviews.enterprise.models import Entreprise, ProLocalisation
 from foxreviews.location.models import Ville
+from foxreviews.reviews.models import AvisDecrypte
 from foxreviews.subcategory.models import SousCategorie
 
 User = get_user_model()
@@ -37,12 +38,23 @@ class TestFiltrageSansAvis:
         ville = Ville.objects.first()
         sous_cat = SousCategorie.objects.first()
         if ville and sous_cat:
-            ProLocalisation.objects.create(
+            pro_loc = ProLocalisation.objects.create(
                 entreprise=entreprise,
                 ville=ville,
                 sous_categorie=sous_cat,
                 nb_avis=5,  # Avec avis
                 note_moyenne=4.5,
+            )
+
+            AvisDecrypte.objects.create(
+                entreprise=entreprise,
+                pro_localisation=pro_loc,
+                texte_brut="avis publics en ligne",
+                texte_decrypte="Très bon service, rapide et efficace.",
+                source="google",
+                has_reviews=True,
+                review_source="avis publics en ligne",
+                review_rating=4.5,
             )
         return entreprise
 
@@ -168,15 +180,18 @@ class TestFiltrageSansAvis:
         entreprise_avec_avis,
         entreprise_sans_avis,
     ):
-        """ProLocalisation API publique filtre aussi par nb_avis."""
+        """ProLocalisation API publique filtre aussi via AvisDecrypte.has_reviews."""
         response = api_client.get("/api/v1/pro-localisations/")
         
         assert response.status_code == 200
         results = response.json().get("results", [])
         
-        # Toutes les ProLocalisations retournées doivent avoir nb_avis > 0
-        for pro_loc in results:
-            assert pro_loc.get("nb_avis", 0) > 0
+        # Toutes les ProLocalisations retournées doivent avoir au moins 1 AvisDecrypte has_reviews=True
+        # (on ne peut pas vérifier ça via la payload API sans champ dédié; on vérifie qu'au moins
+        # l'entreprise sans avis n'apparaît pas dans la liste).
+        entreprise_ids = {pl.get("entreprise") for pl in results}
+        assert str(entreprise_avec_avis.id) in entreprise_ids
+        assert str(entreprise_sans_avis.id) not in entreprise_ids
 
     def test_prolocalisation_admin_voit_tout(
         self,

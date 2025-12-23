@@ -2,6 +2,9 @@
 ViewSets pour l'app Enterprise.
 """
 
+from django.db.models import OuterRef
+from django.db.models import Subquery
+from django.db.models.functions import Coalesce
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import OpenApiResponse
 from drf_spectacular.utils import extend_schema
@@ -23,6 +26,7 @@ from foxreviews.enterprise.api.serializers import ProLocalisationDetailSerialize
 from foxreviews.enterprise.api.serializers import ProLocalisationListSerializer
 from foxreviews.enterprise.models import Entreprise
 from foxreviews.enterprise.models import ProLocalisation
+from foxreviews.reviews.models import AvisDecrypte
 
 
 class EntrepriseViewSet(CRUDViewSet):
@@ -80,10 +84,10 @@ class EntrepriseViewSet(CRUDViewSet):
             # Clients authentifiés peuvent voir leurs entreprises même sans avis
             return base_qs
         
-        # API publique : uniquement entreprises avec au moins 1 avis
-        # Filtre via ProLocalisation.nb_avis > 0
+        # API publique : uniquement entreprises avec avis publics.
+        # Source de vérité: AvisDecrypte.has_reviews (relation ProLocalisation -> avis)
         return base_qs.filter(
-            pro_localisations__nb_avis__gt=0
+            pro_localisations__avis_decryptes__has_reviews=True,
         ).distinct()
     
     def get_serializer_class(self):
@@ -190,10 +194,37 @@ class ProLocalisationViewSet(CRUDViewSet):
         "sous_categorie",
         "ville",
     ).only(
-        "id", "score_global", "note_moyenne", "nb_avis", "is_active", "is_verified", "created_at",
+        "id", "score_global", "note_moyenne", "nb_avis", "meta_description", "is_active", "is_verified", "created_at",
         "entreprise__id", "entreprise__nom", "entreprise__nom_commercial",
         "sous_categorie__id", "sous_categorie__nom",
         "ville__id", "ville__nom"
+    ).annotate(
+        ai_review_source=Coalesce(
+            Subquery(
+                AvisDecrypte.objects.filter(
+                    pro_localisation=OuterRef("pk"),
+                    has_reviews=True,
+                )
+                .order_by("-date_generation")
+                .values("review_source")[:1]
+            ),
+            Subquery(
+                AvisDecrypte.objects.filter(
+                    pro_localisation=OuterRef("pk"),
+                    has_reviews=True,
+                )
+                .order_by("-date_generation")
+                .values("source")[:1]
+            ),
+        ),
+        ai_review_count=Subquery(
+            AvisDecrypte.objects.filter(
+                pro_localisation=OuterRef("pk"),
+                has_reviews=True,
+            )
+            .order_by("-date_generation")
+            .values("review_count")[:1]
+        ),
     )
     serializer_class = ProLocalisationListSerializer
     pagination_class = ResultsPageNumberPagination
@@ -230,7 +261,34 @@ class ProLocalisationViewSet(CRUDViewSet):
                 "entreprise",
                 "sous_categorie",
                 "ville",
-            ).all()
+            ).annotate(
+                ai_review_source=Coalesce(
+                    Subquery(
+                        AvisDecrypte.objects.filter(
+                            pro_localisation=OuterRef("pk"),
+                            has_reviews=True,
+                        )
+                        .order_by("-date_generation")
+                        .values("review_source")[:1]
+                    ),
+                    Subquery(
+                        AvisDecrypte.objects.filter(
+                            pro_localisation=OuterRef("pk"),
+                            has_reviews=True,
+                        )
+                        .order_by("-date_generation")
+                        .values("source")[:1]
+                    ),
+                ),
+                ai_review_count=Subquery(
+                    AvisDecrypte.objects.filter(
+                        pro_localisation=OuterRef("pk"),
+                        has_reviews=True,
+                    )
+                    .order_by("-date_generation")
+                    .values("review_count")[:1]
+                ),
+            )
         else:
             # Pour list, utiliser .only() (déjà défini)
             base_qs = queryset
@@ -245,8 +303,8 @@ class ProLocalisationViewSet(CRUDViewSet):
         if self.request.user.is_authenticated and show_all:
             return base_qs
         
-        # API publique : uniquement ProLocalisations avec au moins 1 avis
-        return base_qs.filter(nb_avis__gt=0)
+        # API publique : uniquement ProLocalisations avec avis publics.
+        return base_qs.filter(avis_decryptes__has_reviews=True).distinct()
     
     def get_serializer_class(self):
         """Utilise le serializer détaillé pour retrieve."""

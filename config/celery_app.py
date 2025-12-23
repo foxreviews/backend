@@ -58,4 +58,18 @@ app.conf.beat_schedule = {
         "task": "generate_ville_contents",
         "schedule": crontab(month_of_year="2,8", day_of_month=1, hour=5, minute=0),
     },
+
+    # Auto-run: planifie progressivement decryptage_avis sur toutes les ProLocalisations
+    # (activable via AI_DECRYPTAGE_AUTORUN_ENABLED)
+    "autorun-decryptage-avis-bulk": {
+        "task": "reviews.autorun_decryptage_avis_bulk",
+        "schedule": crontab(minute="*/5"),
+    },
+
+    # Auto-heal: retente périodiquement les items échoués (re-enqueue)
+    "retry-failed-items": {
+        "task": "retry_failed_items",
+        "schedule": crontab(minute="*/10"),
+        "args": (None, 200),
+    },
 }

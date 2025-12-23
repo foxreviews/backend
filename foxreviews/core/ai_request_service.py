@@ -8,6 +8,7 @@ import re
 import logging
 import time
 import uuid
+import os
 from datetime import timedelta
 
 import requests
@@ -28,9 +29,25 @@ class AIRequestService:
     AVIS_EXPIRATION_DAYS = 90
     
     def __init__(self):
-        self.ai_url = getattr(settings, "AI_SERVICE_URL", "http://agent_app_local:8000")
-        self.ai_timeout = getattr(settings, "AI_SERVICE_TIMEOUT", 60)
-        self.api_key = getattr(settings, "AI_SERVICE_API_KEY", "")
+        # Note: Ces settings ne sont pas forcément déclarés dans config/settings/*.py.
+        # On fallback sur les variables d'environnement pour éviter une config "silencieuse".
+        self.ai_url = (
+            getattr(settings, "AI_SERVICE_URL", None)
+            or os.getenv("AI_SERVICE_URL")
+            or "http://agent_app_local:8000"
+        )
+        self.ai_timeout = int(
+            getattr(settings, "AI_SERVICE_TIMEOUT", None)
+            or os.getenv("AI_SERVICE_TIMEOUT", "60")
+        )
+        self.api_key = (
+            getattr(settings, "AI_SERVICE_API_KEY", None)
+            or os.getenv("AI_SERVICE_API_KEY")
+            or ""
+        )
+
+        # Dernière erreur rencontrée (utilisé par les commandes pour expliquer un ⚠️)
+        self.last_error_details: str | None = None
     
     def should_regenerate(self, prolocalisation: ProLocalisation) -> tuple[bool, str]:
         """
@@ -214,28 +231,76 @@ class AIRequestService:
         Returns:
             dict | None: Réponse de l'IA ou None si erreur
         """
+        self.last_error_details = None
+
         try:
             headers = {"Content-Type": "application/json"}
-            
+
             if self.api_key:
                 headers["X-Host-Header"] = self.api_key
-            
+
             response = requests.post(
                 f"{self.ai_url}/api/v1/redaction/avis",
                 json=payload,
-                timeout=self.ai_timeout,
+                # timeout=(connect, read)
+                timeout=(5, self.ai_timeout),
                 headers=headers,
             )
-            response.raise_for_status()
-            
-            return response.json()
-            
+
+            if response.status_code >= 400:
+                body = (response.text or "").strip().replace("\n", " ")
+                body_short = body[:300]
+                self.last_error_details = f"HTTP {response.status_code}: {body_short}" if body_short else f"HTTP {response.status_code}"
+                logger.error(
+                    "Erreur IA HTTP: status=%s request_id=%s url=%s body=%s",
+                    response.status_code,
+                    payload.get("request_id"),
+                    getattr(response, "url", ""),
+                    body_short,
+                )
+                return None
+
+            try:
+                return response.json()
+            except Exception:
+                body = (response.text or "").strip().replace("\n", " ")
+                self.last_error_details = f"Réponse non-JSON: {body[:300]}" if body else "Réponse non-JSON"
+                logger.error(
+                    "Réponse IA non-JSON: request_id=%s url=%s body=%s",
+                    payload.get("request_id"),
+                    getattr(response, "url", ""),
+                    body[:300],
+                )
+                return None
+
         except requests.exceptions.Timeout:
-            logger.error(f"Timeout IA pour request_id={payload.get('request_id')}")
+            self.last_error_details = f"timeout après {self.ai_timeout}s"
+            logger.error(
+                "Timeout IA: request_id=%s url=%s timeout=%ss",
+                payload.get("request_id"),
+                f"{self.ai_url}/api/v1/redaction/avis",
+                self.ai_timeout,
+            )
             return None
-            
+
+        except requests.exceptions.ConnectionError as e:
+            self.last_error_details = f"connection_error: {e}"
+            logger.error(
+                "Erreur IA connexion: request_id=%s url=%s err=%s",
+                payload.get("request_id"),
+                f"{self.ai_url}/api/v1/redaction/avis",
+                str(e),
+            )
+            return None
+
         except requests.exceptions.RequestException as e:
-            logger.error(f"Erreur IA: {e}")
+            self.last_error_details = f"request_error: {e}"
+            logger.error(
+                "Erreur IA requête: request_id=%s url=%s err=%s",
+                payload.get("request_id"),
+                f"{self.ai_url}/api/v1/redaction/avis",
+                str(e),
+            )
             return None
     
     def generate_review(
@@ -257,8 +322,10 @@ class AIRequestService:
         """
         start_time = time.time()
         success = False
-        error_details = None
         texte = None
+
+        # Reset erreur au début de chaque génération
+        self.last_error_details = None
         
         try:
             # Vérifier si génération nécessaire
@@ -276,12 +343,18 @@ class AIRequestService:
             # Envoyer requête
             response = self.send_request(payload)
             if not response:
-                error_details = "Aucune réponse du service IA"
+                self.last_error_details = self.last_error_details or "Aucune réponse du service IA"
+                logger.warning(
+                    "Génération IA échouée (pas de réponse): request_id=%s entreprise=%s reason=%s",
+                    payload.get("request_id"),
+                    prolocalisation.entreprise.nom,
+                    self.last_error_details,
+                )
                 return False, None
             
             # Vérifier status
             if response.get("status") != "success":
-                error_details = f"Status: {response.get('status')}"
+                self.last_error_details = f"Status: {response.get('status')}"
                 logger.warning(
                     f"Génération échouée pour request_id={payload['request_id']}: "
                     f"{response.get('status')}"
@@ -293,7 +366,7 @@ class AIRequestService:
             texte = avis_data.get("texte", "")
             
             if not texte:
-                error_details = "Texte vide reçu"
+                self.last_error_details = "Texte vide reçu"
                 logger.warning(f"Texte vide reçu pour request_id={payload['request_id']}")
                 return False, None
             
@@ -324,18 +397,21 @@ class AIRequestService:
                             texte = texte_sanitized
                         else:
                             error_details = f"Validation échouée après correction: {rejection_reason2}"
+                            self.last_error_details = error_details
                             logger.warning(
                                 f"❌ Avis rejeté pour {prolocalisation.entreprise.nom}: {rejection_reason2}"
                             )
                             return False, None
                     else:
                         error_details = f"Validation échouée: {rejection_reason}"
+                        self.last_error_details = error_details
                         logger.warning(
                             f"❌ Avis rejeté pour {prolocalisation.entreprise.nom}: {rejection_reason}"
                         )
                         return False, None
                 else:
                     error_details = f"Validation échouée: {rejection_reason}"
+                    self.last_error_details = error_details
                     logger.warning(
                         f"❌ Avis rejeté pour {prolocalisation.entreprise.nom}: {rejection_reason}"
                     )
@@ -365,6 +441,7 @@ class AIRequestService:
             )
             
             success = True
+            self.last_error_details = None
             
             # Logging structuré
             duration = time.time() - start_time
@@ -394,7 +471,7 @@ class AIRequestService:
             return True, texte
             
         except Exception as e:
-            error_details = str(e)
+            self.last_error_details = str(e)
             duration = time.time() - start_time
             
             # Logging structuré de l'erreur
@@ -405,7 +482,7 @@ class AIRequestService:
                 duration=duration,
                 success=False,
                 quality=quality,
-                error_details=error_details,
+                error_details=self.last_error_details,
             )
             
             raise
