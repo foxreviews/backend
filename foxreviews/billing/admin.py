@@ -3,12 +3,12 @@ Admin configuration for billing app.
 """
 
 from django.contrib import admin
-from django.db.models import Count
-from django.db.models import Q
-from django.db.models import Sum
+from django.db.models import Count, Q, Sum, Avg
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
+from datetime import timedelta
 
 from foxreviews.billing.models import ClickEvent
 from foxreviews.billing.models import Invoice
@@ -16,8 +16,64 @@ from foxreviews.billing.models import Subscription
 from foxreviews.billing.models import ViewEvent
 
 
+class BillingMetricsMixin:
+    """Mixin pour afficher les métriques de billing dans l'admin."""
+    
+    def changelist_view(self, request, extra_context=None):
+        """Ajoute les métriques au changelist."""
+        extra_context = extra_context or {}
+        
+        # Abonnements actifs
+        active_subs = Subscription.objects.filter(status='active').count()
+        
+        # MRR (Monthly Recurring Revenue)
+        mrr = Subscription.objects.filter(
+            status='active'
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        # ARR (Annual Recurring Revenue)
+        arr = mrr * 12
+        
+        # Taux de churn (annulations ce mois)
+        now = timezone.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        churned_this_month = Subscription.objects.filter(
+            status='canceled',
+            canceled_at__gte=month_start
+        ).count()
+        churn_rate = (churned_this_month / active_subs * 100) if active_subs > 0 else 0
+        
+        # Paiements échoués (ce mois)
+        failed_payments = Subscription.objects.filter(
+            status='past_due'
+        ).count()
+        
+        # Nouveaux abonnements (ce mois)
+        new_subs = Subscription.objects.filter(
+            created_at__gte=month_start
+        ).count()
+        
+        # Revenus ce mois
+        monthly_revenue = Invoice.objects.filter(
+            status='paid',
+            period_start__gte=month_start
+        ).aggregate(total=Sum('amount_paid'))['total'] or 0
+        
+        extra_context['billing_metrics'] = {
+            'active_subscriptions': active_subs,
+            'mrr': f'{mrr:.2f} €',
+            'arr': f'{arr:.2f} €',
+            'churn_rate': f'{churn_rate:.1f}%',
+            'failed_payments': failed_payments,
+            'new_subscriptions': new_subs,
+            'monthly_revenue': f'{monthly_revenue:.2f} €',
+        }
+        
+        return super().changelist_view(request, extra_context=extra_context)
+
+
 @admin.register(Subscription)
-class SubscriptionAdmin(admin.ModelAdmin):
+class SubscriptionAdmin(BillingMetricsMixin, admin.ModelAdmin):
     """Admin pour Subscription avec KPIs."""
 
     list_display = [
@@ -34,6 +90,8 @@ class SubscriptionAdmin(admin.ModelAdmin):
         "cancel_at_period_end",
         "created_at",
     ]
+    show_full_result_count = False
+    list_select_related = ["entreprise"]
     search_fields = [
         "entreprise__nom",
         "entreprise__siren",
@@ -159,6 +217,8 @@ class InvoiceAdmin(admin.ModelAdmin):
         "paid_at",
         "created_at",
     ]
+    show_full_result_count = False
+    list_select_related = ["entreprise"]
     search_fields = [
         "entreprise__nom",
         "invoice_number",
@@ -216,6 +276,8 @@ class ClickEventAdmin(admin.ModelAdmin):
         "page_type",
         "timestamp",
     ]
+    show_full_result_count = False
+    list_select_related = ["entreprise", "sponsorisation"]
     search_fields = [
         "entreprise__nom",
         "page_url",
@@ -269,6 +331,8 @@ class ViewEventAdmin(admin.ModelAdmin):
         "page_type",
         "timestamp",
     ]
+    show_full_result_count = False
+    list_select_related = ["entreprise"]
     search_fields = [
         "entreprise__nom",
         "page_url",

@@ -39,6 +39,7 @@ services:
       dockerfile: ./compose/production/postgres/Dockerfile
     image: foxreviews_production_postgres
     container_name: foxreviews_local_postgres
+    shm_size: "2gb"
     volumes:
       - foxreviews_local_postgres_data:/var/lib/postgresql/18/docker
       - foxreviews_local_postgres_data_backups:/backups

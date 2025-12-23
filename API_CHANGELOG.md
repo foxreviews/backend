@@ -4,6 +4,9 @@
 
 ### 🔐 Authentification (3 nouveaux endpoints)
 
+**Note (27 décembre 2025):** `POST /api/auth/register/` peut lier automatiquement le compte à une entreprise existante via `siret`/`siren` (ou `entreprise_id`).
+Si l'entreprise est introuvable, l'API renvoie `400` (inscription refusée).
+
 | Méthode | Endpoint | Description | Auth |
 |---------|----------|-------------|------|
 | `POST` | `/api/auth/register/` | Inscription nouvel utilisateur + token | ❌ Public |

@@ -23,6 +23,8 @@ from rest_framework.response import Response
 
 from foxreviews.billing.models import Invoice
 from foxreviews.billing.models import Subscription
+from foxreviews.billing.email_service import SubscriptionEmailService
+from foxreviews.billing.refund_service import RefundService
 from foxreviews.core.services import SponsorshipService
 from foxreviews.enterprise.models import ProLocalisation
 from foxreviews.sponsorisation.models import Sponsorisation
@@ -33,6 +35,41 @@ logger = logging.getLogger(__name__)
 stripe.api_key = getattr(settings, "STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = getattr(settings, "STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID = getattr(settings, "STRIPE_SPONSORSHIP_PRICE_ID", "")
+
+
+def get_or_create_stripe_customer(entreprise):
+    """Crée ou récupère un Stripe Customer pour une entreprise."""
+    from foxreviews.enterprise.models import Entreprise
+    
+    # Vérifier si l'entreprise a déjà un customer_id
+    if entreprise.stripe_customer_id:
+        try:
+            customer = stripe.Customer.retrieve(entreprise.stripe_customer_id)
+            if not customer.get('deleted'):
+                return customer
+        except stripe.error.StripeError:
+            # Customer n'existe plus, on va en créer un nouveau
+            pass
+    
+    # Créer un nouveau Customer
+    try:
+        customer = stripe.Customer.create(
+            email=entreprise.email_contact,
+            name=entreprise.nom,
+            metadata={
+                "entreprise_id": str(entreprise.id),
+                "siren": entreprise.siren or "",
+            },
+        )
+        
+        # Sauvegarder le customer_id
+        entreprise.stripe_customer_id = customer.id
+        entreprise.save(update_fields=["stripe_customer_id"])
+        
+        return customer
+    except stripe.error.StripeError as e:
+        logger.exception(f"Erreur création Stripe Customer: {e}")
+        raise
 
 
 # Serializers
@@ -111,14 +148,23 @@ def create_checkout_session(request):
     try:
         # Montant mensuel (99€ par défaut)
         montant_mensuel = 99.00
+        
+        # Créer ou récupérer le Stripe Customer
+        customer = get_or_create_stripe_customer(pro_loc.entreprise)
 
-        # Idempotency key pour éviter les doublons
-        idempotency_key = f"checkout_{pro_loc.id}_{request.user.id}"
-
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            mode="subscription",
-            line_items=[
+        # Créer ou récupérer le Price (produit Stripe)
+        # Note: En production, créez le Price via le Dashboard Stripe et utilisez STRIPE_PRICE_ID
+        if STRIPE_PRICE_ID:
+            # Utiliser le Price ID configuré
+            line_items = [
+                {
+                    "price": STRIPE_PRICE_ID,
+                    "quantity": 1,
+                }
+            ]
+        else:
+            # Créer un Price dynamiquement (pour dev/test)
+            line_items = [
                 {
                     "price_data": {
                         "currency": "eur",
@@ -134,17 +180,27 @@ def create_checkout_session(request):
                     },
                     "quantity": 1,
                 },
-            ],
+            ]
+
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer.id,
+            mode="subscription",
+            line_items=line_items,
             metadata={
                 "pro_localisation_id": str(pro_loc.id),
                 "entreprise_id": str(pro_loc.entreprise_id),
                 "duration_months": duration_months,
                 "montant_mensuel": montant_mensuel,
             },
-            success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
+            success_url=request.build_absolute_uri('/billing/subscription/success/?session_id={CHECKOUT_SESSION_ID}'),
             cancel_url=cancel_url,
-            customer_email=pro_loc.entreprise.email_contact or None,
-            idempotency_key=idempotency_key,
+            # Permettre au client de gérer son abonnement via Customer Portal
+            subscription_data={
+                "metadata": {
+                    "pro_localisation_id": str(pro_loc.id),
+                    "entreprise_id": str(pro_loc.entreprise_id),
+                }
+            },
         )
 
         return Response(
@@ -159,6 +215,127 @@ def create_checkout_session(request):
         return Response(
             {"error": f"Erreur Stripe: {e!s}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@extend_schema(
+    summary="Créer session Customer Portal",
+    description="""
+    Crée une session Stripe Customer Portal pour gérer l'abonnement.
+    
+    Le Customer Portal permet au client de :
+    - Voir ses factures
+    - Mettre à jour son mode de paiement
+    - Annuler son abonnement
+    """,
+    request=serializers.Serializer,
+    responses={
+        200: OpenApiResponse(
+            response=serializers.Serializer, description="Session créée avec succès",
+        ),
+        400: OpenApiResponse(description="Entreprise sans Customer ID"),
+        404: OpenApiResponse(description="Entreprise non trouvée"),
+    },
+    tags=["Stripe"],
+)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_customer_portal_session(request):
+    """
+    Crée une session Stripe Customer Portal.
+    """
+    return_url = request.data.get("return_url", request.build_absolute_uri("/"))
+    
+    try:
+        # Récupérer l'entreprise de l'utilisateur
+        # Adaptez selon votre logique d'authentification
+        from foxreviews.enterprise.models import Entreprise
+        
+        # Exemple: si l'user a une relation avec entreprise
+        entreprise = Entreprise.objects.filter(
+            pro_localisations__subscriptions__user=request.user
+        ).first()
+        
+        if not entreprise:
+            return Response(
+                {"error": "Aucune entreprise trouvée"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        
+        if not entreprise.stripe_customer_id:
+            return Response(
+                {"error": "Aucun compte Stripe associé"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Créer la session Customer Portal
+        portal_session = stripe.billing_portal.Session.create(
+            customer=entreprise.stripe_customer_id,
+            return_url=return_url,
+        )
+        
+        return Response(
+            {
+                "url": portal_session.url,
+            },
+        )
+    
+    except stripe.error.StripeError as e:
+        logger.exception(f"Stripe error: {e}")
+        return Response(
+            {"error": f"Erreur Stripe: {e!s}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@extend_schema(
+    summary="Créer un remboursement",
+    description="""
+    Crée un remboursement pour une facture.
+    Réservé aux administrateurs.
+    """,
+    request=serializers.Serializer,
+    responses={
+        200: OpenApiResponse(description="Remboursement créé"),
+        400: OpenApiResponse(description="Erreur lors du remboursement"),
+        403: OpenApiResponse(description="Permission refusée"),
+    },
+    tags=["Stripe Admin"],
+)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_refund(request):
+    """
+    Crée un remboursement (admin uniquement).
+    """
+    # Vérifier que l'utilisateur est admin
+    if not request.user.is_staff:
+        return Response(
+            {"error": "Permission refusée"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    invoice_id = request.data.get("invoice_id")
+    amount = request.data.get("amount")  # Optionnel
+    reason = request.data.get("reason", "requested_by_customer")
+    
+    if not invoice_id:
+        return Response(
+            {"error": "invoice_id requis"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    
+    result = RefundService.create_refund(invoice_id, amount, reason)
+    
+    if result['success']:
+        return Response({
+            "success": True,
+            "refund_id": result['refund'].id if result['refund'] else None,
+        })
+    else:
+        return Response(
+            {"error": result['error']},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
 
@@ -264,6 +441,12 @@ def _handle_checkout_completed(session):
         logger.info(
             f"Checkout completed: Subscription {subscription.id}, Sponsorisation {sponso.id}",
         )
+        
+        # Envoyer email de confirmation
+        SubscriptionEmailService.send_subscription_confirmation(
+            subscription,
+            customer_portal_url=f"{settings.FRONTEND_URL}/account/billing"
+        )
 
     except Exception as e:
         logger.exception(f"Erreur checkout completed: {e}")
@@ -320,6 +503,9 @@ def _handle_payment_succeeded(invoice_data):
             pass
 
         logger.info(f"Paiement réussi: Subscription {subscription.id}, Invoice créée")
+        
+        # Envoyer email de confirmation de paiement
+        SubscriptionEmailService.send_payment_succeeded(subscription, Invoice.objects.last())
 
     except Subscription.DoesNotExist:
         logger.warning(f"Subscription introuvable pour {stripe_subscription_id}")
@@ -328,6 +514,9 @@ def _handle_payment_succeeded(invoice_data):
 
 
 def _handle_payment_failed(invoice_data):
+    """Gère l'échec du paiement: marque la subscription en past_due."""
+    stripe_subscription_id = invoice_data.get("subscription")
+    stripe_invoice_id = invoice_data.get("id")
 
     try:
         # Mettre à jour la subscription Django
@@ -370,6 +559,10 @@ def _handle_payment_failed(invoice_data):
             pass
 
         logger.warning(f"Paiement échoué: Subscription {subscription.id}")
+        
+        # Envoyer email d'alerte
+        last_invoice = Invoice.objects.filter(subscription=subscription).last()
+        SubscriptionEmailService.send_payment_failed_alert(subscription, last_invoice)
 
     except Subscription.DoesNotExist:
         logger.warning(f"Subscription introuvable pour {stripe_subscription_id}")
@@ -406,6 +599,9 @@ def _handle_subscription_deleted(subscription_data):
             pass
 
         logger.info(f"Abonnement annulé: Subscription {subscription.id}")
+        
+        # Envoyer email d'annulation
+        SubscriptionEmailService.send_subscription_canceled(subscription)
 
     except Subscription.DoesNotExist:
         logger.warning(f"Subscription introuvable pour {stripe_subscription_id}")

@@ -4,9 +4,8 @@ from datetime import timedelta
 from django.contrib import admin
 from django.contrib import messages
 from django.db.models import Count
-from django.db.models import Q
-from django.db.models import Sum
-from django.urls import reverse
+from django.db.models import Exists
+from django.db.models import OuterRef
 from django.utils import timezone
 from django.utils.html import format_html
 
@@ -28,21 +27,17 @@ class EntrepriseAdmin(admin.ModelAdmin):
         "ville_nom",
         "code_postal",
         "subscription_badge",
-        "total_clicks_30d",
-        "total_views_30d",
         "is_active",
         "created_at",
     ]
     list_filter = ["is_active", "naf_code", "created_at"]
-    search_fields = [
-        "siren",
-        "siret",
-        "nom",
-        "nom_commercial",
-        "ville_nom",
-        "naf_libelle",
-    ]
-    ordering = ["nom"]
+    # Sur une table à plusieurs millions de lignes, la recherche "icontains" sur
+    # des champs texte et le tri alphabétique coûtent très cher.
+    # On privilégie donc les identifiants (siren/siret) en exact match.
+    search_fields = ["=siren", "=siret"]
+    ordering = ["id"]
+    show_full_result_count = False
+    list_per_page = 50
     readonly_fields = [
         "created_at",
         "updated_at",
@@ -122,16 +117,24 @@ class EntrepriseAdmin(admin.ModelAdmin):
         ),
     ]
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+
+        # These models are imported lazily to avoid circular imports at import-time.
+        from foxreviews.billing.models import Subscription
+
+        active_subscription_exists = Subscription.objects.filter(
+            entreprise_id=OuterRef("pk"),
+            status__in=["active", "trialing"],
+        )
+
+        return qs.annotate(
+            has_active_subscription=Exists(active_subscription_exists),
+        )
+
     def subscription_badge(self, obj):
         """Badge abonnement actif."""
-        from foxreviews.billing.models import Subscription
-        
-        active_sub = Subscription.objects.filter(
-            entreprise=obj,
-            status__in=["active", "trialing"],
-        ).first()
-        
-        if active_sub:
+        if getattr(obj, "has_active_subscription", False):
             return format_html(
                 '<span style="background-color: green; color: white; padding: 3px 8px; border-radius: 3px;">✓ ACTIF</span>'
             )
@@ -142,26 +145,32 @@ class EntrepriseAdmin(admin.ModelAdmin):
 
     def total_clicks_30d(self, obj):
         """Clics 30 derniers jours."""
+        annotated = getattr(obj, "clicks_30d", None)
+        if annotated is not None:
+            return annotated
+
         from foxreviews.billing.models import ClickEvent
-        
+
         thirty_days_ago = timezone.now() - timedelta(days=30)
-        count = ClickEvent.objects.filter(
+        return ClickEvent.objects.filter(
             entreprise=obj,
             timestamp__gte=thirty_days_ago,
         ).count()
-        return count
     total_clicks_30d.short_description = "Clics (30j)"
 
     def total_views_30d(self, obj):
         """Vues 30 derniers jours."""
+        annotated = getattr(obj, "views_30d", None)
+        if annotated is not None:
+            return annotated
+
         from foxreviews.billing.models import ViewEvent
-        
+
         thirty_days_ago = timezone.now() - timedelta(days=30)
-        count = ViewEvent.objects.filter(
+        return ViewEvent.objects.filter(
             entreprise=obj,
             timestamp__gte=thirty_days_ago,
         ).count()
-        return count
     total_views_30d.short_description = "Vues (30j)"
 
     # KPIs readonly fields
@@ -296,6 +305,8 @@ class ProLocalisationAdmin(admin.ModelAdmin):
         "ville__nom",
     ]
     ordering = ["-score_global", "-note_moyenne"]
+    show_full_result_count = False
+    list_select_related = ["entreprise", "sous_categorie", "ville"]
     raw_id_fields = ["entreprise", "sous_categorie", "ville"]
     readonly_fields = ["score_global", "date_derniere_generation_ia", "created_at", "updated_at"]
     actions = [

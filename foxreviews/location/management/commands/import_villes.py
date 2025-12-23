@@ -10,6 +10,7 @@ Format CSV attendu:
 
 import csv
 import json
+import re
 
 from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
@@ -20,6 +21,16 @@ from foxreviews.location.models import Ville
 
 class Command(BaseCommand):
     help = "Importe les villes depuis un fichier CSV"
+
+    def _normalize_cp(self, value) -> str:
+        raw = ("" if value is None else str(value)).strip()
+        m5 = re.search(r"\d{5}", raw)
+        if m5:
+            return m5.group(0)
+        m4 = re.search(r"\d{4}", raw)
+        if m4:
+            return m4.group(0).zfill(5)
+        return ""
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -61,16 +72,31 @@ class Command(BaseCommand):
                             # Si c'est pas du JSON, on crée une liste avec le code postal principal
                             codes_postaux = [row["code_postal_principal"]]
 
+                        cp_principal = self._normalize_cp(row.get("code_postal_principal"))
+                        if not cp_principal:
+                            cp_principal = (row.get("code_postal_principal") or "").strip()
+
+                        normalized_codes = []
+                        for cp in (codes_postaux or []):
+                            cp_norm = self._normalize_cp(cp)
+                            if cp_norm:
+                                normalized_codes.append(cp_norm)
+                        if cp_principal:
+                            normalized_codes.insert(0, cp_principal)
+                        normalized_codes = list(dict.fromkeys(normalized_codes))
+                        if not normalized_codes:
+                            normalized_codes = codes_postaux
+
                         # Générer le slug
-                        slug = slugify(f"{row['nom']}-{row['code_postal_principal']}")
+                        slug = slugify(f"{row['nom']}-{cp_principal}")
 
                         # Créer ou mettre à jour la ville
                         _ville, created = Ville.objects.update_or_create(
                             slug=slug,
                             defaults={
                                 "nom": row["nom"],
-                                "code_postal_principal": row["code_postal_principal"],
-                                "codes_postaux": codes_postaux,
+                                "code_postal_principal": cp_principal,
+                                "codes_postaux": normalized_codes,
                                 "departement": row.get("departement", ""),
                                 "region": row.get("region", ""),
                                 "lat": float(row.get("lat", 0)),

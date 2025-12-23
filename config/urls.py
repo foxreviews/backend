@@ -10,6 +10,7 @@ from drf_spectacular.views import SpectacularAPIView
 from drf_spectacular.views import SpectacularSwaggerView
 from rest_framework.authtoken.views import obtain_auth_token
 from django.http import JsonResponse
+from django.http import HttpResponse
 
 urlpatterns = [
     path("", TemplateView.as_view(template_name="pages/home.html"), name="home"),
@@ -19,6 +20,13 @@ urlpatterns = [
         name="about",
     ),
     path("healthz", lambda request: JsonResponse({"status": "ok"})),
+    path(
+        "metrics",
+        lambda request: _prometheus_metrics_view(request),
+        name="metrics",
+    ),
+    # Billing success page
+    path("billing/subscription/success/", include("foxreviews.billing.urls")),
     # Django Admin, use {% url 'admin:index' %}
     path(settings.ADMIN_URL, admin.site.urls),
     # User management
@@ -29,6 +37,21 @@ urlpatterns = [
     # Media files
     *static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT),
 ]
+
+
+def _prometheus_metrics_view(request):
+    # Lazy import to avoid any startup cost if not used.
+    if not getattr(settings, "PROMETHEUS_METRICS_ENABLED", False):
+        return HttpResponse("metrics disabled\n", status=404, content_type="text/plain")
+
+    try:
+        from prometheus_client import CONTENT_TYPE_LATEST
+        from prometheus_client import generate_latest
+    except Exception:
+        return HttpResponse("prometheus_client not available\n", status=503, content_type="text/plain")
+
+    output = generate_latest()
+    return HttpResponse(output, content_type=CONTENT_TYPE_LATEST)
 if settings.DEBUG:
     # Static file serving when using Gunicorn + Uvicorn for local web socket development
     urlpatterns += staticfiles_urlpatterns()

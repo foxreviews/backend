@@ -13,6 +13,7 @@ import traceback
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from django.db import models
 from django.db import transaction
 from django.utils import timezone
 

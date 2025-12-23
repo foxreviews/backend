@@ -218,6 +218,8 @@ class ProLocalisationSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     ville_nom = serializers.CharField(source="ville.nom", read_only=True)
+    review_source = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ProLocalisation
@@ -230,15 +232,43 @@ class ProLocalisationSerializer(serializers.ModelSerializer):
             "ville",
             "ville_nom",
             "zone_description",
+            "meta_description",
             "note_moyenne",
             "nb_avis",
-            "score_global",
+            "review_source",
+            "review_count",
             "is_verified",
             "is_active",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "score_global", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_review_source(self, obj):
+        annotated = getattr(obj, "ai_review_source", None)
+        if annotated is not None:
+            return annotated
+        avis = (
+            obj.avis_decryptes.filter(has_reviews=True)
+            .order_by("-date_generation")
+            .only("review_source", "source")
+            .first()
+        )
+        if not avis:
+            return None
+        return (avis.review_source or avis.source or None)
+
+    def get_review_count(self, obj):
+        annotated = getattr(obj, "ai_review_count", None)
+        if annotated is not None:
+            return annotated
+        avis = (
+            obj.avis_decryptes.filter(has_reviews=True)
+            .order_by("-date_generation")
+            .only("review_count")
+            .first()
+        )
+        return getattr(avis, "review_count", None) if avis else None
 
 
 class ProLocalisationDetailSerializer(ProLocalisationSerializer):
@@ -255,8 +285,11 @@ class ProLocalisationDetailSerializer(ProLocalisationSerializer):
 
     def get_avis_decryptes(self, obj):
         """Retourne les avis décryptés actifs."""
-        avis = obj.avis_decryptes.filter(needs_regeneration=False).order_by(
-            "-date_generation",
+        avis = (
+            obj.avis_decryptes.filter(needs_regeneration=False)
+            .exclude(texte_decrypte__isnull=True)
+            .exclude(texte_decrypte__exact="")
+            .order_by("-date_generation")
         )[:1]
         return AvisDecrypteSerializer(avis, many=True).data
 
@@ -285,13 +318,15 @@ class AvisDecrypteSerializer(serializers.ModelSerializer):
             "pro_localisation",
             "texte_brut",
             "texte_decrypte",
-            "synthese_courte",
-            "faq",
             "source",
+            "has_reviews",
+            "review_source",
+            "review_count",
+            "job_id",
+            "ai_payload",
             "date_generation",
             "date_expiration",
             "needs_regeneration",
-            "confidence_score",
             "created_at",
             "updated_at",
         ]

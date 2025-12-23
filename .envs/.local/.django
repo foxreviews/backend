@@ -22,5 +22,5 @@ INSEE_TIMEOUT=30
 # AI Service
 # ------------------------------------------------------------------------------
 AI_SERVICE_URL=http://agent_app_local:8000
-AI_SERVICE_TIMEOUT=60
+AI_SERVICE_TIMEOUT=180
 AI_SERVICE_API_KEY=2f5be65e-fc08-42f3-a51e-9751aaaaa88c

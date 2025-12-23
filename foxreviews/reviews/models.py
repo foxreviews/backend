@@ -29,8 +29,11 @@ class AvisDecrypte(BaseModel):
 
     # Texte
     texte_brut = models.TextField(help_text=_("Texte source de l'avis"))
+    # 🔒 Règle éditoriale: peut rester null si aucun avis public exploitable.
     texte_decrypte = models.TextField(
-        help_text=_("Texte décrypté par l'IA"),
+        null=True,
+        blank=True,
+        help_text=_("Texte décrypté par l'IA (null si aucun avis public exploitable)"),
     )
 
     # Métadonnées
@@ -38,6 +41,48 @@ class AvisDecrypte(BaseModel):
         max_length=50,
         default="google",
         help_text=_("Source de l'avis (google, facebook, etc.)"),
+    )
+
+    # Indicateur canonique "a des avis publics" (sert de relation ProLocalisation -> avis)
+    has_reviews = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text=_("Indique si des avis publics existent pour cette ProLocalisation"),
+    )
+
+    review_source = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text=_("Source des avis (ex: 'avis publics en ligne', 'google')"),
+    )
+
+    review_rating = models.FloatField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(5)],
+        help_text=_("Note moyenne des avis sources (0-5)"),
+    )
+
+    review_count = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+        help_text=_("Nombre d'avis sources (si fourni par l'IA)"),
+    )
+
+    job_id = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=_("Identifiant job FastAPI (si applicable)"),
+    )
+
+    ai_payload = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=_("Payload brut/normalisé renvoyé par l'IA (debug/traçabilité)"),
     )
     date_generation = models.DateTimeField(auto_now_add=True)
     date_expiration = models.DateTimeField(
@@ -64,6 +109,7 @@ class AvisDecrypte(BaseModel):
         ordering = ["-date_generation"]
         indexes = [
             models.Index(fields=["entreprise", "pro_localisation"]),
+            models.Index(fields=["pro_localisation", "has_reviews"]),
             models.Index(fields=["needs_regeneration", "date_expiration"]),
             models.Index(fields=["-date_generation"]),
         ]

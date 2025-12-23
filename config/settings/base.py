@@ -175,6 +175,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
@@ -199,6 +200,17 @@ STATICFILES_FINDERS = [
     "django.contrib.staticfiles.finders.FileSystemFinder",
     "django.contrib.staticfiles.finders.AppDirectoriesFinder",
 ]
+
+# Django 5 prefers STORAGES over STATICFILES_STORAGE/DEFAULT_FILE_STORAGE.
+# This enables WhiteNoise to serve collected static assets in production.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # MEDIA
 # ------------------------------------------------------------------------------
@@ -503,6 +515,18 @@ SPECTACULAR_SETTINGS = {
 FASTAPI_BASE_URL = env.str("FASTAPI_BASE_URL", default="http://localhost:8080")
 FASTAPI_API_KEY = env.str("FASTAPI_API_KEY", default="")
 FASTAPI_TIMEOUT = env.int("FASTAPI_TIMEOUT", default=60)
+
+# Auto-run IA decryptage_avis (planification Celery Beat)
+# ------------------------------------------------------------------------------
+# IMPORTANT: désactivé par défaut. Activer en prod via env:
+#   AI_DECRYPTAGE_AUTORUN_ENABLED=true
+AI_DECRYPTAGE_AUTORUN_ENABLED = env.bool("AI_DECRYPTAGE_AUTORUN_ENABLED", default=False)
+AI_DECRYPTAGE_AUTORUN_ANGLE = env.str("AI_DECRYPTAGE_AUTORUN_ANGLE", default="SEO")
+AI_DECRYPTAGE_AUTORUN_BATCH_SIZE = env.int("AI_DECRYPTAGE_AUTORUN_BATCH_SIZE", default=500)
+AI_DECRYPTAGE_AUTORUN_MAX_BATCHES = env.int("AI_DECRYPTAGE_AUTORUN_MAX_BATCHES", default=10)
+AI_DECRYPTAGE_AUTORUN_QUEUE = env.str("AI_DECRYPTAGE_AUTORUN_QUEUE", default="ai_generation")
+AI_DECRYPTAGE_AUTORUN_POLL_COUNTDOWN = env.int("AI_DECRYPTAGE_AUTORUN_POLL_COUNTDOWN", default=15)
+AI_DECRYPTAGE_AUTORUN_INCLUDE_INACTIVE = env.bool("AI_DECRYPTAGE_AUTORUN_INCLUDE_INACTIVE", default=False)
 
 # Stripe Payment
 STRIPE_SECRET_KEY = env.str("STRIPE_SECRET_KEY", default="")

@@ -20,6 +20,9 @@ services:
     env_file:
       - ./.envs/.production/.django
       - ./.envs/.production/.postgres
+    networks:
+      - default
+      - foxreviews_shared
     command: /start
 
   postgres:
@@ -27,6 +30,7 @@ services:
       context: .
       dockerfile: ./compose/production/postgres/Dockerfile
     image: foxreviews_production_postgres
+    shm_size: "2gb"
     volumes:
       - production_postgres_data:/var/lib/postgresql/18/docker
       - production_postgres_data_backups:/backups
@@ -48,9 +52,9 @@ services:
       - '0.0.0.0:5555:5555'
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.api-http.rule=Host(`api.foxreviews.com`)"
+      - "traefik.http.routers.api-http.rule=Host(`api.fox-reviews.com`)"
       - "traefik.http.routers.api-http.entrypoints=web"
-      - "traefik.http.routers.api-https.rule=Host(`api.foxreviews.com`)"
+      - "traefik.http.routers.api-https.rule=Host(`api.fox-reviews.com`)"
       - "traefik.http.routers.api-https.entrypoints=web-secure"
       - "traefik.http.routers.api-https.tls.certresolver=letsencrypt"
 
@@ -91,3 +95,9 @@ services:
       - ./.envs/.production/.django
     volumes:
       - production_postgres_data_backups:/backups:z
+
+networks:
+  default:
+    name: foxreviews_production_django
+  foxreviews_shared:
+    external: true

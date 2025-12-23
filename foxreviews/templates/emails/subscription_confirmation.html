@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
+        .content { background: #f9f9f9; padding: 30px; }
+        .button { display: inline-block; padding: 12px 24px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+        .info-box { background: white; border-left: 4px solid #4CAF50; padding: 15px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>✅ Abonnement activé</h1>
+        </div>
+        
+        <div class="content">
+            <p>Bonjour {{ entreprise_nom }},</p>
+            
+            <p>Votre abonnement de sponsorisation est maintenant <strong>actif</strong> !</p>
+            
+            <div class="info-box">
+                <h3>Détails de votre abonnement</h3>
+                <p><strong>Montant :</strong> {{ montant }} {{ currency }}/mois</p>
+                <p><strong>Prochaine facturation :</strong> {{ next_billing_date|date:"d/m/Y" }}</p>
+                {% if pro_localisation %}
+                <p><strong>Page sponsorisée :</strong> {{ pro_localisation.sous_categorie.nom }} - {{ pro_localisation.ville.nom }}</p>
+                {% endif %}
+            </div>
+            
+            <p>Vous pouvez gérer votre abonnement à tout moment depuis votre espace client :</p>
+            
+            <center>
+                <a href="{{ customer_portal_url }}" class="button">Gérer mon abonnement</a>
+            </center>
+            
+            <p>Depuis votre espace, vous pourrez :</p>
+            <ul>
+                <li>Consulter vos factures</li>
+                <li>Mettre à jour votre mode de paiement</li>
+                <li>Annuler votre abonnement</li>
+            </ul>
+            
+            <p>Merci pour votre confiance !</p>
+            
+            <p>Cordialement,<br>L'équipe Fox Reviews</p>
+        </div>
+        
+        <div class="footer">
+            <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
+            <p>&copy; {{ "now"|date:"Y" }} Fox Reviews. Tous droits réservés.</p>
+        </div>
+    </div>
+</body>
+</html>

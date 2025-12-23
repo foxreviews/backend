@@ -67,6 +67,14 @@ class Entreprise(BaseModel):
     email_contact = models.EmailField(blank=True)
     site_web = models.URLField(blank=True)
     
+    # Stripe
+    stripe_customer_id = models.CharField(
+        max_length=255,
+        blank=True,
+        db_index=True,
+        help_text=_("Stripe Customer ID (cus_xxx)"),
+    )
+    
     # Données Google Maps / Enrichissement
     domain = models.CharField(
         max_length=255,

@@ -114,10 +114,21 @@ const registerResponse = await fetch('/api/auth/register/', {
   body: JSON.stringify({
     email: 'client@example.com',
     password: 'SecurePassword123!',
-    name: 'Jean Dupont'
+    name: 'Jean Dupont',
+    // Obligatoire: fournir au moins un identifiant pour lier le compte à une entreprise existante
+    // (le backend refuse l'inscription si introuvable)
+    siret: '12345678900011'
   })
 });
-const { token } = await registerResponse.json();
+const registerJson = await registerResponse.json();
+if (!registerResponse.ok) {
+  // Exemples d'erreurs renvoyées:
+  // { error: "Entreprise introuvable pour ce SIREN/SIRET. Veuillez vérifier vos informations." }
+  // { siret: ["Le SIRET doit contenir exactement 14 chiffres."] }
+  // { non_field_errors: ["Veuillez fournir un SIREN/SIRET ..."] }
+  throw registerJson;
+}
+const { token } = registerJson;
 
 // 2. Utiliser le token pour les requêtes suivantes
 const headers = {

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Abonnement confirmé - FoxReviews</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        .success-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 24px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .success-icon svg {
+            width: 48px;
+            height: 48px;
+            stroke: white;
+            stroke-width: 3;
+            fill: none;
+        }
+
+        h1 {
+            color: #1f2937;
+            text-align: center;
+            font-size: 32px;
+            margin-bottom: 16px;
+        }
+
+        .subtitle {
+            color: #6b7280;
+            text-align: center;
+            font-size: 18px;
+            margin-bottom: 32px;
+        }
+
+        .subscription-card {
+            background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+
+        .subscription-detail {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .subscription-detail:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .detail-value {
+            color: #1f2937;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .amount {
+            color: #10b981;
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .button {
+            display: block;
+            width: 100%;
+            padding: 16px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            text-align: center;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 16px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+        }
+
+        .button-secondary {
+            background: transparent;
+            border: 2px solid #667eea;
+            color: #667eea;
+            box-shadow: none;
+        }
+
+        .button-secondary:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .info-box {
+            background: #f0f9ff;
+            border-left: 4px solid #3b82f6;
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 24px;
+        }
+
+        .info-box p {
+            color: #1e40af;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 24px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .subtitle {
+                font-size: 16px;
+            }
+
+            .amount {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success-icon">
+            <svg viewBox="0 0 24 24">
+                <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+        </div>
+
+        <h1>🎉 Abonnement confirmé !</h1>
+        <p class="subtitle">Merci pour votre confiance. Votre abonnement est maintenant actif.</p>
+
+        <div class="subscription-card">
+            <div class="subscription-detail">
+                <span class="detail-label">Montant</span>
+                <span class="detail-value amount">{{ subscription.amount|floatformat:2 }} {{ subscription.currency|upper }}</span>
+            </div>
+            <div class="subscription-detail">
+                <span class="detail-label">Période en cours</span>
+                <span class="detail-value">{{ subscription.current_period_start|date:"d/m/Y" }} - {{ subscription.current_period_end|date:"d/m/Y" }}</span>
+            </div>
+            <div class="subscription-detail">
+                <span class="detail-label">Prochain paiement</span>
+                <span class="detail-value">{{ subscription.current_period_end|date:"d F Y" }}</span>
+            </div>
+            <div class="subscription-detail">
+                <span class="detail-label">Statut</span>
+                <span class="detail-value">{% if subscription.status == 'active' %}✅ Actif{% else %}{{ subscription.status }}{% endif %}</span>
+            </div>
+        </div>
+
+        <a href="{{ portal_url }}" class="button">
+            🔧 Gérer mon abonnement
+        </a>
+
+        <a href="{% url 'dashboard' %}" class="button button-secondary">
+            📊 Accéder au tableau de bord
+        </a>
+
+        <div class="info-box">
+            <p>
+                <strong>💡 Bon à savoir :</strong><br>
+                • Vous recevrez un email de confirmation avec votre facture<br>
+                • Vous pouvez modifier ou annuler votre abonnement à tout moment<br>
+                • Vos factures sont accessibles dans votre espace client
+            </p>
+        </div>
+    </div>
+</body>
+</html>

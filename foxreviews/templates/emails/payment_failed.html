@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #f44336; color: white; padding: 20px; text-align: center; }
+        .content { background: #f9f9f9; padding: 30px; }
+        .button { display: inline-block; padding: 12px 24px; background: #f44336; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+        .warning-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚠️ Échec du paiement</h1>
+        </div>
+        
+        <div class="content">
+            <p>Bonjour {{ entreprise_nom }},</p>
+            
+            <p>Nous n'avons pas pu traiter le paiement de votre abonnement.</p>
+            
+            <div class="warning-box">
+                <h3>Informations sur le paiement</h3>
+                <p><strong>Montant dû :</strong> {{ montant }} {{ currency }}</p>
+                <p><strong>Date d'échéance :</strong> {{ due_date|date:"d/m/Y" }}</p>
+            </div>
+            
+            <p><strong>Raisons possibles :</strong></p>
+            <ul>
+                <li>Carte bancaire expirée</li>
+                <li>Fonds insuffisants</li>
+                <li>Carte refusée par votre banque</li>
+                <li>Limite de paiement atteinte</li>
+            </ul>
+            
+            <p>Pour éviter la suspension de votre abonnement, merci de mettre à jour votre mode de paiement :</p>
+            
+            <center>
+                <a href="{{ update_payment_url }}" class="button">Mettre à jour mon paiement</a>
+            </center>
+            
+            {% if invoice_url %}
+            <p>Vous pouvez aussi consulter <a href="{{ invoice_url }}">votre facture en ligne</a>.</p>
+            {% endif %}
+            
+            <p><strong>Important :</strong> Si le paiement n'est pas régularisé sous 7 jours, votre abonnement sera automatiquement suspendu.</p>
+            
+            <p>Pour toute question, n'hésitez pas à nous contacter.</p>
+            
+            <p>Cordialement,<br>L'équipe Fox Reviews</p>
+        </div>
+        
+        <div class="footer">
+            <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
+            <p>&copy; {{ "now"|date:"Y" }} Fox Reviews. Tous droits réservés.</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -22,6 +22,7 @@ import logging
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.db.models import Q
 
 from foxreviews.enterprise.models import Entreprise
 from foxreviews.enterprise.models import ProLocalisation
@@ -44,12 +45,19 @@ class Command(BaseCommand):
             "naf_non_mappe": 0,
             "erreurs": 0,
         }
+        self._ville_cache = {}
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Simulation sans sauvegarde en base",
+        )
+        parser.add_argument(
+            "--batch-size",
+            type=int,
+            default=1000,
+            help="Taille des lots (défaut: 1000)",
         )
         parser.add_argument(
             "--limit",
@@ -62,10 +70,43 @@ class Command(BaseCommand):
             help="Recréer même si ProLocalisation existe déjà",
         )
 
+        mode = parser.add_mutually_exclusive_group()
+        mode.add_argument(
+            "--only-missing",
+            action="store_true",
+            default=None,
+            help="Traite uniquement les entreprises sans ProLocalisation (défaut)",
+        )
+        mode.add_argument(
+            "--all",
+            action="store_true",
+            default=None,
+            help="Traite toutes les entreprises (plus long)",
+        )
+
+        order = parser.add_mutually_exclusive_group()
+        order.add_argument(
+            "--newest-first",
+            action="store_true",
+            default=None,
+            help="Traite d'abord les entreprises les plus récentes (défaut)",
+        )
+        order.add_argument(
+            "--oldest-first",
+            action="store_true",
+            default=None,
+            help="Traite d'abord les entreprises les plus anciennes",
+        )
+
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
+        batch_size = options["batch_size"]
         limit = options.get("limit")
         force = options["force"]
+        only_missing_opt = options.get("only_missing")
+        all_opt = options.get("all")
+        newest_first_opt = options.get("newest_first")
+        oldest_first_opt = options.get("oldest_first")
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -75,6 +116,25 @@ class Command(BaseCommand):
 
         # Récupérer les entreprises
         entreprises = Entreprise.objects.filter(is_active=True)
+
+        # Par défaut: ne traiter que les entreprises sans prolocalisation.
+        # En mode --force, on garde le défaut "only-missing" (ça évite un run massif inutile),
+        # mais l'utilisateur peut demander explicitement --all.
+        if all_opt is True:
+            only_missing = False
+        elif only_missing_opt is True:
+            only_missing = True
+        else:
+            only_missing = True
+
+        if only_missing:
+            entreprises = entreprises.filter(pro_localisations__isnull=True)
+
+        # Par défaut: traiter les plus récentes en premier.
+        if oldest_first_opt is True:
+            entreprises = entreprises.order_by("created_at", "id")
+        else:
+            entreprises = entreprises.order_by("-created_at", "-id")
 
         if limit:
             entreprises = entreprises[:limit]
@@ -88,18 +148,45 @@ class Command(BaseCommand):
                 self.style.WARNING("   ⚠️  MODE DRY-RUN - Aucune sauvegarde\n"),
             )
 
-        # Traiter par lots
-        batch_size = 100
-        for i in range(0, total, batch_size):
-            batch = entreprises[i : i + batch_size]
-            self.stdout.write(f"\n📦 Lot {i // batch_size + 1}/{(total + batch_size - 1) // batch_size}...")
+        # Traiter par lots (sans OFFSET: iterator + chunk)
+        lot_num = 0
+        current_batch = []
 
-            for entreprise in batch:
-                self._process_entreprise(entreprise, dry_run, force)
+        entreprises = entreprises.only("id", "nom", "ville_nom", "code_postal", "naf_code", "created_at")
+        for entreprise in entreprises.iterator(chunk_size=batch_size):
+            current_batch.append(entreprise)
+            if len(current_batch) < batch_size:
+                continue
 
-            # Affichage progression
-            processed = min(i + batch_size, total)
-            percent = (processed / total) * 100
+            lot_num += 1
+            self.stdout.write(
+                f"\n📦 Lot {lot_num}/{(total + batch_size - 1) // batch_size}...",
+            )
+
+            self._process_batch(current_batch, dry_run, force)
+            current_batch = []
+
+            processed = self.stats["entreprises_traitees"]
+            percent = (processed / total) * 100 if total else 100
+            self.stdout.write(
+                f"   {processed}/{total} ({percent:.1f}%) - "
+                f"✅ {self.stats['proloc_creees']} créées, "
+                f"⏭️  {self.stats['proloc_existantes']} existantes, "
+                f"🏙️  {self.stats['ville_non_trouvee']} ville manquante, "
+                f"📊 {self.stats['naf_non_mappe']} NAF non mappé, "
+                f"❌ {self.stats['erreurs']} erreurs",
+            )
+
+        # Reste
+        if current_batch:
+            lot_num += 1
+            self.stdout.write(
+                f"\n📦 Lot {lot_num}/{(total + batch_size - 1) // batch_size}...",
+            )
+            self._process_batch(current_batch, dry_run, force)
+
+            processed = self.stats["entreprises_traitees"]
+            percent = (processed / total) * 100 if total else 100
             self.stdout.write(
                 f"   {processed}/{total} ({percent:.1f}%) - "
                 f"✅ {self.stats['proloc_creees']} créées, "
@@ -111,6 +198,17 @@ class Command(BaseCommand):
 
         # Stats finales
         self._display_stats()
+
+    def _process_batch(self, batch, dry_run, force):
+        """Traite un batch d'entreprises."""
+        if dry_run:
+            for entreprise in batch:
+                self._process_entreprise(entreprise, dry_run, force)
+            return
+
+        with transaction.atomic():
+            for entreprise in batch:
+                self._process_entreprise(entreprise, dry_run, force)
 
     def _process_entreprise(self, entreprise, dry_run, force):
         """Traite une entreprise et crée sa ProLocalisation si possible."""
@@ -198,25 +296,58 @@ class Command(BaseCommand):
         if not entreprise.ville_nom or entreprise.ville_nom == "Ville non renseignée":
             return None
 
+        ville_nom = (entreprise.ville_nom or "").strip()
+        if not ville_nom:
+            return None
+
+        cp = (entreprise.code_postal or "").strip()
+        key = (ville_nom.lower(), cp)
+        cached = self._ville_cache.get(key)
+        if cached is not None:
+            return cached or None
+
         # Essayer avec nom + code postal
-        if entreprise.code_postal:
-            ville = Ville.objects.filter(
-                nom__iexact=entreprise.ville_nom,
-                code_postal_principal=entreprise.code_postal,
-            ).first()
+        if cp:
+            ville = (
+                Ville.objects.filter(
+                    nom__iexact=ville_nom,
+                    code_postal_principal=cp,
+                )
+                .only("id", "nom", "code_postal_principal")
+                .first()
+            )
             if ville:
+                self._ville_cache[key] = ville
                 return ville
 
             # Essayer avec codes_postaux (JSON field)
-            ville = Ville.objects.filter(
-                nom__iexact=entreprise.ville_nom,
-                codes_postaux__contains=entreprise.code_postal,
-            ).first()
+            ville = (
+                Ville.objects.filter(
+                    nom__iexact=ville_nom,
+                    codes_postaux__contains=[cp],
+                )
+                .only("id", "nom", "code_postal_principal")
+                .first()
+            )
             if ville:
+                self._ville_cache[key] = ville
                 return ville
 
         # Essayer juste avec le nom (moins précis)
-        ville = Ville.objects.filter(nom__iexact=entreprise.ville_nom).first()
+        key2 = (ville_nom.lower(), "")
+        cached2 = self._ville_cache.get(key2)
+        if cached2 is not None:
+            self._ville_cache[key] = cached2
+            return cached2 or None
+
+        ville = (
+            Ville.objects.filter(nom__iexact=ville_nom)
+            .only("id", "nom", "code_postal_principal")
+            .first()
+        )
+
+        self._ville_cache[key2] = ville or False
+        self._ville_cache[key] = ville or False
         return ville
 
     def _display_stats(self):

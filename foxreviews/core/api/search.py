@@ -5,6 +5,8 @@ Moteur de recherche principal: catégorie × sous-catégorie × ville
 
 import random
 
+from django.core.cache import cache
+
 from drf_spectacular.utils import OpenApiParameter
 from drf_spectacular.utils import OpenApiResponse
 from drf_spectacular.utils import extend_schema
@@ -190,32 +192,46 @@ def search_enterprises(request):
     organic_queryset = queryset.exclude(id__in=sponsored_ids)
 
     max_organic = min(page_size - len(sponsored_prolocalisations), 15)
-    
-    # 🎲 ROTATION DYNAMIQUE SCALABLE (à chaque requête)
-    # 
-    # Stratégie: Récupérer un pool plus large, shuffle en Python
-    # Avantages:
-    # - ✅ Rotation à chaque requête (100% équitable)
-    # - ✅ Pas de ORDER BY RANDOM() en DB (scalable)
-    # - ✅ Shuffle Python très rapide (microseconde)
-    # - ✅ Utilisateurs différents voient ordres différents
-    # - ✅ Refresh = nouvel ordre
-    
+
+    # 🎲 ROTATION ORGANIQUE ÉQUITABLE SUR TOUT LE STOCK
+    #
+    # Objectif: sur des appels successifs, les organiques affichés "tournent" et
+    # couvrent progressivement tout le matching (pas seulement un pool initial).
+    # Implémentation: curseur (last_seen_id) stocké en cache par triplet.
+
+    def _rotation_cache_key() -> str:
+        # On scope la rotation à la requête (cat/souscat/ville + page_size).
+        # Utiliser les IDs quand possible (stable), sinon les slugs.
+        cat_part = str(getattr(locals().get("categorie", None), "id", "") or (categorie_slug or ""))
+        sc_part = str(getattr(locals().get("sous_categorie", None), "id", "") or (sous_categorie_slug or ""))
+        ville_part = str(getattr(locals().get("ville", None), "id", "") or (ville_slug or ""))
+        return f"search_rotation:cat={cat_part}:sc={sc_part}:ville={ville_part}:page_size={page_size}"
+
+    rotation_key = _rotation_cache_key()
+    last_seen_id = str(cache.get(rotation_key) or "").strip()
+
+    organic_prolocalisations: list[ProLocalisation] = []
+    if max_organic > 0:
+        ordered = organic_queryset.order_by("id")
+
+        if last_seen_id:
+            organic_prolocalisations = list(ordered.filter(id__gt=last_seen_id)[:max_organic])
+        else:
+            organic_prolocalisations = list(ordered[:max_organic])
+
+        # Wrap-around: si on est en fin de liste, on reprend au début.
+        if len(organic_prolocalisations) < max_organic:
+            missing = max_organic - len(organic_prolocalisations)
+            organic_prolocalisations.extend(list(ordered[:missing]))
+
+        # Aspect "random": shuffle local (sans casser la rotation globale).
+        random.shuffle(organic_prolocalisations)
+
+        if organic_prolocalisations:
+            cache.set(rotation_key, str(organic_prolocalisations[-1].id), timeout=24 * 3600)
+
+    # has_next: on vérifie l'existence d'au moins 1 item au-delà de max_organic
     total_organic = organic_queryset.count()
-    
-    # Pool size: 3x ce qu'on veut afficher (pour bonne rotation)
-    pool_size = min(max_organic * 3, total_organic, 100)  # Max 100 pour perf
-    
-    # Récupérer le pool avec ordre prévisible (ORDER BY id = rapide)
-    organic_pool = list(
-        organic_queryset.order_by("id")[:pool_size]
-    )
-    
-    # Shuffle en Python (très rapide, pas de DB load)
-    random.shuffle(organic_pool)
-    
-    # Prendre les N premiers après shuffle
-    organic_prolocalisations = organic_pool[:max_organic]
 
     # Sérialisation avec contexte pour is_sponsored
     sponsored_data = SearchResultSerializer(
@@ -247,8 +263,7 @@ def search_enterprises(request):
                 "max_sponsored_per_page": 5,
                 "has_next": has_next,
                 "rotation_active": True,
-                "rotation_type": "dynamic_shuffle",  # Shuffle à chaque requête
-                "pool_size": pool_size,  # Pour debug
+                "rotation_type": "cache_cursor_wrap_shuffle",
                 "sponsoring_active": True,
             },
             "filters": filters_applied,

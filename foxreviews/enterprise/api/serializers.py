@@ -73,6 +73,8 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     ville_nom = serializers.CharField(source="ville.nom", read_only=True)
+    review_source = serializers.CharField(source="ai_review_source", read_only=True, allow_null=True)
+    review_count = serializers.IntegerField(source="ai_review_count", read_only=True, allow_null=True)
 
     class Meta:
         model = ProLocalisation
@@ -86,9 +88,11 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
             "sous_categorie_nom",
             "ville",
             "ville_nom",
+            "meta_description",
             "note_moyenne",
             "nb_avis",
-            "score_global",
+            "review_source",
+            "review_count",
             "is_verified",
             "is_active",
             "created_at",
@@ -97,7 +101,9 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
             "id",
             "note_moyenne",
             "nb_avis",
-            "score_global",
+            "meta_description",
+            "review_source",
+            "review_count",
             "created_at",
             "updated_at",
         ]
@@ -105,6 +111,10 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
 
 class SearchResultSerializer(serializers.ModelSerializer):
     """Serializer pour résultats de recherche avec avis IA."""
+
+    # IDs explicites: éviter la confusion frontend (Entreprise.id vs ProLocalisation.id)
+    pro_localisation_id = serializers.UUIDField(source="id", read_only=True)
+    entreprise_id = serializers.UUIDField(source="entreprise.id", read_only=True)
 
     nom = serializers.CharField(source="entreprise.nom", read_only=True)
     siren = serializers.CharField(source="entreprise.siren", read_only=True)
@@ -126,6 +136,8 @@ class SearchResultSerializer(serializers.ModelSerializer):
         model = ProLocalisation
         fields = [
             "id",
+            "pro_localisation_id",
+            "entreprise_id",
             "nom",
             "siren",
             "siret",
@@ -134,9 +146,9 @@ class SearchResultSerializer(serializers.ModelSerializer):
             "categorie",
             "sous_categorie",
             "avis_redaction",
+            "meta_description",
             "note_moyenne",
             "nb_avis",
-            "score_global",
             "is_sponsored",
         ]
 

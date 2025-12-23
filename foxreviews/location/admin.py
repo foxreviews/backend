@@ -18,3 +18,4 @@ class VilleAdmin(admin.ModelAdmin):
     search_fields = ["nom", "code_postal_principal", "departement"]
     prepopulated_fields = {"slug": ("nom",)}
     ordering = ["nom"]
+    show_full_result_count = False

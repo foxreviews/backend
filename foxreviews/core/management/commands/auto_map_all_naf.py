@@ -8,10 +8,14 @@ Usage:
 
 import logging
 import os
+import re
+import unicodedata
+import uuid
 
 from django.core.management.base import BaseCommand
+from django.db import IntegrityError
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Max, Q
 from django.utils.text import slugify
 
 from foxreviews.category.models import Categorie
@@ -152,11 +156,24 @@ class Command(BaseCommand):
             action="store_true",
             help="Créer les ProLocalisations après le mapping",
         )
+        parser.add_argument(
+            "--ville-stats",
+            action="store_true",
+            help="Afficher des stats sur les codes postaux/villes introuvables (sans créer)",
+        )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=30,
+            help="Nombre de valeurs TOP à afficher pour --ville-stats (défaut: 30)",
+        )
 
     @transaction.atomic
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
         create_proloc = options["create_proloc"]
+        ville_stats = options["ville_stats"]
+        limit = int(options.get("limit") or 30)
         
         self.stdout.write(
             self.style.SUCCESS("\n🎯 MAPPING AUTOMATIQUE DE TOUS LES CODES NAF\n" + "=" * 80),
@@ -164,6 +181,11 @@ class Command(BaseCommand):
         
         if dry_run:
             self.stdout.write(self.style.WARNING("⚠️  MODE DRY-RUN (aucune modification)\n"))
+
+        # Mode diagnostic rapide (ne modifie rien)
+        if ville_stats:
+            self._report_ville_match_stats(limit=limit)
+            return
 
         # Étape 1 : Créer les catégories génériques si nécessaires
         self._ensure_generic_categories(dry_run)
@@ -199,6 +221,155 @@ class Command(BaseCommand):
         
         self.stdout.write("=" * 80 + "\n")
 
+    def _normalize_text(self, value: str) -> str:
+        value = (value or "").strip().lower()
+        value = unicodedata.normalize("NFKD", value)
+        value = "".join(ch for ch in value if not unicodedata.combining(ch))
+        value = re.sub(r"[^a-z0-9\s-]", " ", value)
+        value = re.sub(r"\s+", " ", value).strip()
+        return value
+
+    def _normalize_cp(self, value: str | None) -> str:
+        raw = (value or "").strip()
+        m5 = re.search(r"\d{5}", raw)
+        if m5:
+            return m5.group(0)
+        m4 = re.search(r"\d{4}", raw)
+        if m4:
+            return m4.group(0).zfill(5)
+        return ""
+
+    def _build_ville_indexes(self):
+        """Construit des index en mémoire pour matcher les villes rapidement."""
+        cp_to_villes: dict[str, list[tuple[uuid.UUID, str]]] = {}
+        name_to_first_id: dict[str, uuid.UUID] = {}
+        known_cps: set[str] = set()
+
+        for v in Ville.objects.values("id", "nom", "code_postal_principal", "codes_postaux").iterator(chunk_size=2000):
+            ville_id: uuid.UUID = v["id"]
+            ville_name_norm = self._normalize_text(v["nom"])
+            if ville_name_norm and ville_name_norm not in name_to_first_id:
+                name_to_first_id[ville_name_norm] = ville_id
+
+            cps: list[str] = []
+            cp_principal = self._normalize_cp(v.get("code_postal_principal"))
+            if cp_principal:
+                cps.append(cp_principal)
+            for cp in (v.get("codes_postaux") or []):
+                cp_norm = self._normalize_cp(str(cp))
+                if cp_norm:
+                    cps.append(cp_norm)
+
+            for cp_norm in set(cps):
+                known_cps.add(cp_norm)
+                cp_to_villes.setdefault(cp_norm, []).append((ville_id, ville_name_norm))
+
+        return cp_to_villes, name_to_first_id, known_cps
+
+    def _pick_best_candidate(self, candidates: list[tuple[uuid.UUID, str]], entreprise_name_norm: str) -> uuid.UUID | None:
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0][0]
+        if entreprise_name_norm:
+            for ville_id, ville_name_norm in candidates:
+                if ville_name_norm == entreprise_name_norm:
+                    return ville_id
+            for ville_id, ville_name_norm in candidates:
+                if ville_name_norm and (ville_name_norm in entreprise_name_norm or entreprise_name_norm in ville_name_norm):
+                    return ville_id
+        return candidates[0][0]
+
+    def _find_ville_id_in_indexes(
+        self,
+        cp_to_villes: dict[str, list[tuple[uuid.UUID, str]]],
+        name_to_first_id: dict[str, uuid.UUID],
+        ville_nom: str | None,
+        code_postal: str | None,
+    ) -> uuid.UUID | None:
+        nom_norm = self._normalize_text(ville_nom or "")
+        cp_norm = self._normalize_cp(code_postal)
+
+        ville_id: uuid.UUID | None = None
+        if cp_norm:
+            ville_id = self._pick_best_candidate(cp_to_villes.get(cp_norm, []), nom_norm)
+        if not ville_id and nom_norm:
+            ville_id = name_to_first_id.get(nom_norm)
+        return ville_id
+
+    def _report_ville_match_stats(self, limit: int = 30):
+        """Stats rapides pour comprendre pourquoi les villes ne matchent pas."""
+        self.stdout.write(self.style.SUCCESS("\n📊 STATS VILLES (diagnostic)\n" + "=" * 80))
+
+        qs = Entreprise.objects.filter(pro_localisations__isnull=True, is_active=True)
+        total = qs.count()
+        self.stdout.write(f"Total entreprises (sans proloc, actives): {total}")
+
+        empty_cp = qs.filter(code_postal__exact="").count()
+        empty_city = qs.filter(ville_nom__exact="").count()
+        invalid_cp = qs.exclude(code_postal__regex=r"^\d{4,5}$").count()
+        self.stdout.write(f"CP vides: {empty_cp}")
+        self.stdout.write(f"Ville vides: {empty_city}")
+        self.stdout.write(f"CP invalides (ni 4 ni 5 chiffres): {invalid_cp}")
+
+        # Index villes (35k) en mémoire
+        self.stdout.write("\nIndexation des villes (mémoire)…")
+        cp_to_villes, name_to_first_id, known_cps = self._build_ville_indexes()
+        self.stdout.write(f"Villes indexées: {len(name_to_first_id)} noms, {len(known_cps)} codes postaux")
+
+        # TOP codes postaux bruts
+        self.stdout.write(f"\nTOP {limit} codes_postal (brut) – entreprises sans proloc:")
+        top_cp = list(
+            qs.exclude(code_postal__exact="")
+            .values("code_postal")
+            .annotate(count=Count("id"))
+            .order_by("-count")[:limit]
+        )
+        for row in top_cp:
+            cp_raw = row["code_postal"]
+            count = row["count"]
+            cp_norm = self._normalize_cp(cp_raw)
+            if not cp_norm:
+                status = "INVALID"
+            else:
+                status = "OK" if cp_norm in known_cps else "ABSENT_DANS_VILLE"
+            self.stdout.write(f"- {cp_raw!s} → {cp_norm or '-'} ({status}) : {count}")
+
+        # TOP CP normalisés absents du référentiel Ville
+        missing = []
+        for row in top_cp:
+            cp_norm = self._normalize_cp(row["code_postal"])
+            if cp_norm and cp_norm not in known_cps:
+                missing.append((cp_norm, row["count"]))
+        missing.sort(key=lambda t: t[1], reverse=True)
+        if missing:
+            self.stdout.write(f"\nTOP {min(limit, len(missing))} CP (normalisés) absents de Ville:")
+            for cp_norm, count in missing[:limit]:
+                self.stdout.write(f"- {cp_norm}: {count}")
+
+        # TOP combos cp + ville_nom qui ne matchent pas selon la logique actuelle
+        self.stdout.write(f"\nTOP {limit} couples (code_postal, ville_nom) qui ne matchent pas:")
+        combos = list(
+            qs.exclude(code_postal__exact="")
+            .exclude(ville_nom__exact="")
+            .values("code_postal", "ville_nom")
+            .annotate(count=Count("id"))
+            .order_by("-count")[: max(limit * 3, 50)]
+        )
+        shown = 0
+        for row in combos:
+            if shown >= limit:
+                break
+            ville_id = self._find_ville_id_in_indexes(cp_to_villes, name_to_first_id, row["ville_nom"], row["code_postal"])
+            if ville_id:
+                continue
+            shown += 1
+            self.stdout.write(
+                f"- {row['code_postal']} | {row['ville_nom']} → cp_norm={self._normalize_cp(row['code_postal']) or '-'} | nom_norm={self._normalize_text(row['ville_nom'])} : {row['count']}"
+            )
+
+        self.stdout.write(self.style.SUCCESS("=" * 80 + "\n"))
+
     def _ensure_generic_categories(self, dry_run):
         """Crée les catégories génériques si elles n'existent pas."""
         self.stdout.write("\n📁 Vérification des catégories génériques...")
@@ -232,67 +403,138 @@ class Command(BaseCommand):
     def _auto_map_all_naf(self, dry_run):
         """Mappe automatiquement tous les codes NAF non mappés."""
         self.stdout.write("\n🗺️  Mapping automatique des codes NAF...")
-        
-        # Codes NAF non mappés
-        mapped_codes = set(NAF_TO_SUBCATEGORY.keys())
-        unmapped_naf = (
-            Entreprise.objects
-            .exclude(naf_code__in=mapped_codes)
-            .values("naf_code", "naf_libelle")
-            .annotate(count=Count("id"))
+
+        naf_aggregates = (
+            Entreprise.objects.values("naf_code")
+            .annotate(count=Count("id"), naf_libelle=Max("naf_libelle"))
             .order_by("-count")
         )
-        
+
         new_mappings = []
-        
-        for item in unmapped_naf:
-            naf_code = item["naf_code"]
+
+        for item in naf_aggregates.iterator(chunk_size=2000):
+            raw_naf_code = item["naf_code"]
+            if not raw_naf_code:
+                continue
+
+            naf_code = self._normalize_naf_code(raw_naf_code)
             naf_libelle = item["naf_libelle"] or "Activité professionnelle"
             count = item["count"]
+
+            # Déjà mappé (en tenant compte de la normalisation)
+            # Si la sous-catégorie n'existe pas en DB, on "répare" en créant la SousCategorie
+            # avec le slug EXISTANT (on ne modifie pas naf_mapping.py pour les mappings manuels).
+            existing_slug = NAF_TO_SUBCATEGORY.get(naf_code)
+            if existing_slug:
+                if dry_run:
+                    continue
+                if SousCategorie.objects.filter(slug=existing_slug).exists():
+                    continue
+
+                # Réparer: créer la sous-catégorie manquante en conservant le slug du mapping
+                try:
+                    section = naf_code[:2]
+                    category_slug = SECTION_MAPPING.get(section, "autres-activites")
+                    category = Categorie.objects.filter(slug=category_slug).first() or Categorie.objects.get(slug="autres-activites")
+
+                    # Nom unique pour éviter collision (categorie, nom)
+                    base_name = (naf_libelle or "Activité professionnelle").strip() or "Activité professionnelle"
+                    name_db = base_name[:90]
+                    name_db = f"{name_db} ({naf_code})"[:100]
+
+                    SousCategorie.objects.get_or_create(
+                        slug=existing_slug,
+                        defaults={
+                            "nom": name_db,
+                            "categorie": category,
+                            "description": f"NAF {naf_code} : {naf_libelle}",
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"Erreur réparation sous-catégorie manquante slug={existing_slug} pour {naf_code}: {e}")
+                continue
             
             # Déterminer la catégorie basée sur la section (2 premiers chiffres)
             section = naf_code[:2]
             category_slug = SECTION_MAPPING.get(section, "autres-activites")
             
             # Créer un slug unique pour la sous-catégorie
-            sous_cat_slug = slugify(f"{naf_libelle[:40]}-{naf_code}")
-            
-            new_mappings.append({
-                "naf_code": naf_code,
-                "naf_libelle": naf_libelle,
-                "category_slug": category_slug,
-                "sous_cat_slug": sous_cat_slug,
-                "count": count,
-            })
+            sous_cat_slug = slugify(f"{naf_libelle[:40]}-{naf_code}")[:120]
+            chosen_slug = sous_cat_slug
             
             # Créer la sous-catégorie si nécessaire
             if not dry_run:
                 try:
-                    # Trouver la catégorie
-                    category = Categorie.objects.filter(slug__icontains=category_slug.split("-")[0]).first()
-                    
+                    # Trouver la catégorie (slug exact)
+                    category = Categorie.objects.filter(slug=category_slug).first()
                     if not category:
-                        # Utiliser "Autres Activités" par défaut
                         category = Categorie.objects.get(slug="autres-activites")
-                    
-                    # Créer la sous-catégorie
-                    SousCategorie.objects.get_or_create(
-                        slug=sous_cat_slug,
-                        defaults={
-                            "nom": naf_libelle[:100],
-                            "categorie": category,
-                            "description": f"NAF {naf_code} : {naf_libelle}",
-                        },
+
+                    name_db = naf_libelle[:100]
+
+                    # Si une sous-catégorie existe déjà avec (categorie, nom), la réutiliser
+                    existing_by_name = (
+                        SousCategorie.objects.filter(
+                            categorie=category,
+                            nom=name_db,
+                        )
+                        .only("slug")
+                        .first()
                     )
+
+                    if existing_by_name:
+                        chosen_slug = existing_by_name.slug
+                    else:
+                        try:
+                            sous_cat, _created = SousCategorie.objects.get_or_create(
+                                slug=sous_cat_slug,
+                                defaults={
+                                    "nom": name_db,
+                                    "categorie": category,
+                                    "description": f"NAF {naf_code} : {naf_libelle}",
+                                },
+                            )
+                            chosen_slug = sous_cat.slug
+                        except IntegrityError:
+                            # Collision sur l'unicité (categorie, nom) : recharger l'existant et le réutiliser
+                            existing_by_name = (
+                                SousCategorie.objects.filter(
+                                    categorie=category,
+                                    nom=name_db,
+                                )
+                                .only("slug")
+                                .first()
+                            )
+                            if existing_by_name:
+                                chosen_slug = existing_by_name.slug
+                            else:
+                                raise
+                    
+                    # Mettre à jour le mapping en mémoire (utile si --create-proloc dans le même run)
+                    NAF_TO_SUBCATEGORY[naf_code] = chosen_slug
                     
                 except Exception as e:
                     logger.error(f"Erreur création sous-catégorie {naf_code}: {e}")
+
+            new_mappings.append({
+                "naf_code": naf_code,
+                "naf_libelle": naf_libelle,
+                "category_slug": category_slug,
+                "sous_cat_slug": chosen_slug,
+                "count": count,
+            })
             
             self.stdout.write(
-                f"   {naf_code} → {sous_cat_slug[:40]} ({count} entreprises)"
+                f"   {naf_code} → {chosen_slug[:40]} ({count} entreprises)"
             )
         
         return new_mappings
+
+    def _normalize_naf_code(self, naf_code: str) -> str:
+        naf_code = (naf_code or "").strip().upper()
+        if re.fullmatch(r"\d{4}[A-Z0-9]", naf_code):
+            return f"{naf_code[:2]}.{naf_code[2:]}"
+        return naf_code
 
     def _update_naf_mapping_file(self, new_mappings):
         """Met à jour le fichier naf_mapping.py avec les nouveaux mappings."""
@@ -321,19 +563,59 @@ class Command(BaseCommand):
             if dict_end == -1:
                 self.stdout.write(self.style.ERROR("   ❌ Impossible de trouver la fin du dictionnaire"))
                 return
-            
-            # Préparer les nouvelles lignes
-            new_lines = []
-            for naf_code, slug in sorted(new_mappings.items()):
-                new_lines.append(f'    "{naf_code}": "{slug}",  # Auto-généré')
-            
-            # Insérer les nouvelles lignes avant la fermeture du dictionnaire
-            new_content = (
-                content[:dict_end] + 
-                '\n    # Mappings auto-générés\n' + 
-                '\n'.join(new_lines) + 
-                content[dict_end:]
+
+            dict_block = content[dict_start:dict_end]
+
+            marker = "    # === MAPPINGS AUTO-GÉNÉRÉS ==="
+
+            # Séparer: partie manuelle (tout avant le marker) + partie auto (marker -> fin du dict)
+            marker_pos = dict_block.find(marker)
+            if marker_pos != -1:
+                manual_part = dict_block[:marker_pos].rstrip() + "\n"
+                auto_part = dict_block[marker_pos:]
+            else:
+                manual_part = dict_block.rstrip() + "\n"
+                auto_part = ""
+
+            # Construire un set des codes déjà présents dans la partie manuelle
+            manual_codes = set(
+                re.findall(r'^\s*"([^"]+)"\s*:\s*"[^"]*"\s*,?', manual_part, flags=re.MULTILINE)
             )
+
+            # Parser les entrées auto existantes (si présentes)
+            existing_auto: dict[str, str] = {}
+            if auto_part:
+                for code, slug in re.findall(r'^\s*"([^"]+)"\s*:\s*"([^"]+)"\s*,?', auto_part, flags=re.MULTILINE):
+                    if code not in manual_codes:
+                        existing_auto[code] = slug
+
+            # Merge: ne pas écraser les mappings manuels; mettre à jour/ajouter uniquement dans le bloc auto
+            for mapping in new_mappings:
+                naf_code = mapping["naf_code"]
+                if naf_code in manual_codes:
+                    continue
+                existing_auto[naf_code] = mapping["sous_cat_slug"]
+
+            # Préparer les nouvelles lignes (triées) du bloc auto
+            auto_entries: list[str] = []
+            # Conserver les commentaires (libellé / count) seulement pour les new_mappings (info utile)
+            new_meta = {m["naf_code"]: (m["naf_libelle"], m["count"]) for m in new_mappings}
+            for naf_code in sorted(existing_auto.keys()):
+                slug = existing_auto[naf_code]
+                if naf_code in new_meta:
+                    libelle, count = new_meta[naf_code]
+                    auto_entries.append(f'    "{naf_code}": "{slug}",  # {libelle} ({count} entreprises)')
+                else:
+                    auto_entries.append(f'    "{naf_code}": "{slug}",')
+
+            new_auto_block = ""
+            if auto_entries:
+                new_auto_block = marker + "\n" + "\n".join(auto_entries) + "\n"
+
+            new_dict_block = manual_part.rstrip() + "\n" + new_auto_block
+
+            # Écrire: remplacer le dict_block dans le fichier
+            new_content = content[:dict_start] + new_dict_block + content[dict_end:]
             
             # Écrire le nouveau contenu
             with open(naf_mapping_path, 'w', encoding='utf-8') as f:
@@ -347,113 +629,161 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("   💡 Les SousCategorie sont créées en DB, mais naf_mapping.py n'est pas à jour"))
 
     def _create_missing_prolocalisations(self):
-        """Crée les ProLocalisations manquantes pour toutes les entreprises."""
+        """Crée les ProLocalisations manquantes pour toutes les entreprises (scalable)."""
         self.stdout.write("\n🔗 Création des ProLocalisations...")
-        
-        # Étape 1 : Charger TOUTES les sous-catégories en mémoire (1 query)
-        self.stdout.write("   📊 Chargement des sous-catégories...")
-        naf_to_sous_cat = {}
-        for sous_cat in SousCategorie.objects.select_related('categorie').all():
-            # Extraire le code NAF du slug (format: activite-8412z-8412z ou developpement-web)
-            slug_parts = sous_cat.slug.split('-')
-            for part in slug_parts:
-                if part and (part[0].isdigit() or part[:2].isdigit()):
-                    naf_to_sous_cat[part.upper()] = sous_cat
-        
-        # Étape 2 : Charger TOUTES les villes en mémoire (1 query)
-        self.stdout.write("   📊 Chargement des villes...")
-        villes_by_nom = {}  # {nom.lower(): Ville}
-        villes_by_postal = {}  # {code_postal: Ville}
-        
-        for ville in Ville.objects.all():
-            if ville.nom:
-                villes_by_nom[ville.nom.lower()] = ville
-            if ville.code_postal_principal:
-                villes_by_postal[ville.code_postal_principal] = ville
-        
-        # Étape 3 : Charger les ProLocalisations existantes pour éviter les doublons (1 query)
-        self.stdout.write("   📊 Vérification des ProLocalisations existantes...")
-        existing_proloc_keys = set(
-            ProLocalisation.objects.values_list(
-                'entreprise_id', 'sous_categorie_id', 'ville_id'
-            )
-        )
-        
-        # Étape 4 : Récupérer toutes les entreprises sans ProLocalisation (1 query)
-        self.stdout.write("   📊 Chargement des entreprises...")
-        entreprises_sans_proloc = list(
+
+        # 1) Construire un mapping NAF -> sous_categorie_id (1-2 queries)
+        self.stdout.write("   📊 Préparation du mapping NAF → SousCategorie...")
+        naf_to_slug = {self._normalize_naf_code(k): v for k, v in NAF_TO_SUBCATEGORY.items()}
+        slugs = set(naf_to_slug.values())
+        slug_to_id = {
+            row["slug"]: row["id"]
+            for row in SousCategorie.objects.filter(slug__in=slugs).values("id", "slug")
+        }
+
+        # 2) Index des villes en mémoire (évite N millions de requêtes)
+        #    Objectif: lookup CP-first (beaucoup plus robuste que nom+CP strict)
+        self.stdout.write("   📊 Indexation des villes (CP → Ville) ...")
+
+        def normalize_text(value: str) -> str:
+            value = (value or "").strip().lower()
+            value = unicodedata.normalize("NFKD", value)
+            value = "".join(ch for ch in value if not unicodedata.combining(ch))
+            value = re.sub(r"[^a-z0-9\s-]", " ", value)
+            value = re.sub(r"\s+", " ", value).strip()
+            return value
+
+        def normalize_cp(value: str | None) -> str:
+            return self._normalize_cp(value)
+
+        # cp -> list[(ville_id, normalized_ville_name)]
+        cp_to_villes: dict[str, list[tuple[uuid.UUID, str]]] = {}
+        name_to_first_id: dict[str, uuid.UUID] = {}
+
+        for v in Ville.objects.values("id", "nom", "code_postal_principal", "codes_postaux").iterator(chunk_size=2000):
+            ville_id: uuid.UUID = v["id"]
+            ville_name_norm = normalize_text(v["nom"])
+            if ville_name_norm and ville_name_norm not in name_to_first_id:
+                name_to_first_id[ville_name_norm] = ville_id
+
+            cps: list[str] = []
+            cp_principal = normalize_cp(v.get("code_postal_principal"))
+            if cp_principal:
+                cps.append(cp_principal)
+            for cp in (v.get("codes_postaux") or []):
+                cp_norm = normalize_cp(str(cp))
+                if cp_norm:
+                    cps.append(cp_norm)
+
+            for cp_norm in set(cps):
+                cp_to_villes.setdefault(cp_norm, []).append((ville_id, ville_name_norm))
+
+        # Cache de résolution entreprise -> ville_id
+        ville_cache: dict[str, uuid.UUID | None] = {}
+
+        def pick_best_candidate(candidates: list[tuple[uuid.UUID, str]], entreprise_name_norm: str) -> uuid.UUID | None:
+            if not candidates:
+                return None
+            if len(candidates) == 1:
+                return candidates[0][0]
+            if entreprise_name_norm:
+                for ville_id, ville_name_norm in candidates:
+                    if ville_name_norm == entreprise_name_norm:
+                        return ville_id
+                for ville_id, ville_name_norm in candidates:
+                    if ville_name_norm and (ville_name_norm in entreprise_name_norm or entreprise_name_norm in ville_name_norm):
+                        return ville_id
+            return candidates[0][0]
+
+        def find_ville_id(ville_nom: str | None, code_postal: str | None) -> uuid.UUID | None:
+            nom_norm = normalize_text(ville_nom or "")
+            cp_norm = normalize_cp(code_postal)
+            cache_key = f"{nom_norm}|{cp_norm}"
+            if cache_key in ville_cache:
+                return ville_cache[cache_key]
+
+            ville_id: uuid.UUID | None = None
+
+            # 1) CP-first
+            if cp_norm:
+                candidates = cp_to_villes.get(cp_norm, [])
+                ville_id = pick_best_candidate(candidates, nom_norm)
+
+            # 2) Fallback nom-only (si CP absent ou inconnu)
+            if not ville_id and nom_norm:
+                ville_id = name_to_first_id.get(nom_norm)
+
+            ville_cache[cache_key] = ville_id
+            return ville_id
+
+        # 3) Stream entreprises sans proloc (évite list() gigantesque)
+        qs = (
             Entreprise.objects.filter(
                 pro_localisations__isnull=True,
                 is_active=True,
-            ).values('id', 'siren', 'naf_code', 'ville_nom', 'code_postal')
+            )
+            .order_by("-id")
+            .values("id", "naf_code", "ville_nom", "code_postal")
         )
-        
-        total_count = len(entreprises_sans_proloc)
-        self.stdout.write(f"   📊 {total_count} entreprises à traiter")
-        
-        # Étape 5 : Créer les ProLocalisations en batch
-        prolocalisations_to_create = []
+
+        batch: list[ProLocalisation] = []
+        created = 0
+        skipped_no_naf = 0
         skipped_no_sous_cat = 0
         skipped_no_ville = 0
-        skipped_duplicate = 0
-        
-        for entreprise_data in entreprises_sans_proloc:
-            try:
-                # Trouver la sous-catégorie
-                naf_normalized = entreprise_data['naf_code'].upper() if entreprise_data['naf_code'] else None
-                sous_cat = naf_to_sous_cat.get(naf_normalized)
-                
-                if not sous_cat:
-                    skipped_no_sous_cat += 1
-                    continue
-                
-                # Trouver la ville (priorité: nom, puis code postal)
-                ville = None
-                if entreprise_data['ville_nom']:
-                    ville = villes_by_nom.get(entreprise_data['ville_nom'].lower())
-                
-                if not ville and entreprise_data['code_postal']:
-                    ville = villes_by_postal.get(entreprise_data['code_postal'])
-                
-                if not ville:
-                    skipped_no_ville += 1
-                    continue
-                
-                # Vérifier si existe déjà
-                proloc_key = (entreprise_data['id'], sous_cat.id, ville.id)
-                if proloc_key in existing_proloc_keys:
-                    skipped_duplicate += 1
-                    continue
-                
-                # Préparer la ProLocalisation
-                prolocalisations_to_create.append(
-                    ProLocalisation(
-                        entreprise_id=entreprise_data['id'],
-                        sous_categorie=sous_cat,
-                        ville=ville,
-                        is_active=True,
-                        is_verified=False,
-                    )
+        skipped_no_cp = 0
+
+        self.stdout.write("   📊 Traitement des entreprises (stream)...")
+        for row in qs.iterator(chunk_size=5000):
+            naf_code = self._normalize_naf_code(row.get("naf_code") or "")
+            if not naf_code:
+                skipped_no_naf += 1
+                continue
+
+            slug = naf_to_slug.get(naf_code)
+            if not slug:
+                skipped_no_sous_cat += 1
+                continue
+
+            sous_categorie_id = slug_to_id.get(slug)
+            if not sous_categorie_id:
+                skipped_no_sous_cat += 1
+                continue
+
+            cp_norm = normalize_cp(row.get("code_postal"))
+            if not cp_norm and not (row.get("ville_nom") or "").strip():
+                skipped_no_cp += 1
+
+            ville_id = find_ville_id(row.get("ville_nom"), row.get("code_postal"))
+            if not ville_id:
+                skipped_no_ville += 1
+                continue
+
+            batch.append(
+                ProLocalisation(
+                    entreprise_id=row["id"],
+                    sous_categorie_id=sous_categorie_id,
+                    ville_id=ville_id,
+                    is_active=True,
+                    is_verified=False,
                 )
-                
-            except Exception as e:
-                logger.error(f"Erreur préparation ProLocalisation pour {entreprise_data['siren']}: {e}")
-        
-        # Étape 6 : Bulk insert (1 query)
-        if prolocalisations_to_create:
-            self.stdout.write(f"   💾 Insertion en base de {len(prolocalisations_to_create)} ProLocalisations...")
-            ProLocalisation.objects.bulk_create(
-                prolocalisations_to_create,
-                batch_size=1000,
-                ignore_conflicts=True,
             )
-        
-        # Résumé
-        created_count = len(prolocalisations_to_create)
-        self.stdout.write(f"   ✅ {created_count} ProLocalisations créées")
-        if skipped_no_sous_cat > 0:
-            self.stdout.write(f"   ⚠️  {skipped_no_sous_cat} entreprises sans sous-catégorie trouvée")
-        if skipped_no_ville > 0:
+
+            if len(batch) >= 1000:
+                ProLocalisation.objects.bulk_create(batch, batch_size=1000, ignore_conflicts=True)
+                created += len(batch)
+                batch.clear()
+
+        if batch:
+            ProLocalisation.objects.bulk_create(batch, batch_size=1000, ignore_conflicts=True)
+            created += len(batch)
+
+        self.stdout.write(f"   ✅ ProLocalisations insérées (tentées): {created}")
+        if skipped_no_naf:
+            self.stdout.write(f"   ⚠️  {skipped_no_naf} entreprises sans naf_code")
+        if skipped_no_sous_cat:
+            self.stdout.write(f"   ⚠️  {skipped_no_sous_cat} entreprises sans sous-catégorie mappée")
+        if skipped_no_cp:
+            self.stdout.write(f"   ⚠️  {skipped_no_cp} entreprises sans code_postal/ville_nom")
+        if skipped_no_ville:
             self.stdout.write(f"   ⚠️  {skipped_no_ville} entreprises sans ville trouvée")
-        if skipped_duplicate > 0:
-            self.stdout.write(f"   ℹ️  {skipped_duplicate} doublons évités")

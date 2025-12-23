@@ -31,7 +31,7 @@ certificatesResolvers:
 http:
   routers:
     api-secure-router:
-      rule: 'Host(`api.foxreviews.com`)'
+      rule: 'Host(`api.fox-reviews.com`)'
       entryPoints:
         - web-secure
       middlewares:
@@ -53,7 +53,7 @@ http:
         certResolver: letsencrypt
 
     flower-secure-router:
-      rule: 'Host(`api.foxreviews.com`)'
+      rule: 'Host(`api.fox-reviews.com`)'
       entryPoints:
         - flower
       service: flower

@@ -55,7 +55,13 @@ Ce document récapitule toutes les fonctionnalités backend SaaS implémentées 
 - Inscription d'un utilisateur
 - Crée automatiquement un UserProfile avec rôle CLIENT
 - Génère un token d'authentification
-- Peut lier à une entreprise existante
+- Lie à une entreprise existante via `siret`/`siren` (ou `entreprise_id`)
+- Refuse l'inscription si l'entreprise est introuvable
+
+**Erreurs (réponses typiques):**
+- `400` (entreprise introuvable): `{"error": "Entreprise introuvable pour ce SIREN/SIRET. Veuillez vérifier vos informations."}`
+- `400` (validation): ex. `{"siret": ["Le SIRET doit contenir exactement 14 chiffres."]}` ou `{"non_field_errors": ["Veuillez fournir un SIREN/SIRET (ou un identifiant entreprise) pour lier votre compte."]}`
+- `500` (erreur serveur): `{"error": "Erreur lors de la création du compte"}`
 
 #### **POST /api/auth/login**
 - Authentification par email + mot de passe

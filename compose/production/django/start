@@ -5,6 +5,10 @@ set -o pipefail
 set -o nounset
 
 
+if [ "${COMPRESS_OFFLINE:-}" = "True" ] || [ "${COMPRESS_OFFLINE:-}" = "true" ] || [ "${COMPRESS_OFFLINE:-}" = "1" ]; then
+	python /app/manage.py compress --force
+fi
+
 python /app/manage.py collectstatic --noinput
 
 exec gunicorn config.asgi --bind 0.0.0.0:5000 --chdir=/app -k uvicorn_worker.UvicornWorker

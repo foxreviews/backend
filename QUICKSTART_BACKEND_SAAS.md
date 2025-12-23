@@ -86,9 +86,13 @@ curl -X POST http://localhost:8000/api/auth/register/ \
   -d '{
     "email": "client@test.com",
     "password": "TestPassword123!",
-    "name": "Test Client"
+    "name": "Test Client",
+    "siret": "12345678900011"
   }'
 ```
+
+**Note:** le backend lie automatiquement le compte à une entreprise existante via `siret` (ou `siren`).
+Si aucune entreprise ne correspond, l'API répond `400` avec un message "Entreprise introuvable...".
 
 **Réponse:**
 ```json
@@ -100,6 +104,37 @@ curl -X POST http://localhost:8000/api/auth/register/ \
   },
   "token": "abc123token...",
   "message": "Inscription réussie"
+}
+```
+
+**Erreurs possibles (exemples):**
+
+**400 - Entreprise introuvable (SIREN/SIRET non trouvé)**
+```json
+{
+  "error": "Entreprise introuvable pour ce SIREN/SIRET. Veuillez vérifier vos informations."
+}
+```
+
+**400 - Validation (ex: SIRET invalide / identifiants manquants)**
+```json
+{
+  "siret": ["Le SIRET doit contenir exactement 14 chiffres."]
+}
+```
+
+```json
+{
+  "non_field_errors": [
+    "Veuillez fournir un SIREN/SIRET (ou un identifiant entreprise) pour lier votre compte."
+  ]
+}
+```
+
+**500 - Erreur serveur**
+```json
+{
+  "error": "Erreur lors de la création du compte"
 }
 ```
 

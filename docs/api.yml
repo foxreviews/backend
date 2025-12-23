@@ -59,7 +59,7 @@ info:
 servers:
   - url: http://localhost:8000/api
     description: Développement local
-  - url: https://api.foxreviews.com
+  - url: https://api.fox-reviews.com
     description: Production
 
 tags:

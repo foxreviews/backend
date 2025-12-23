@@ -46,7 +46,10 @@ class VilleViewSet(CRUDViewSet):
         filters.OrderingFilter,
     ]
     filterset_fields = ["code_postal_principal", "departement", "region"]
-    search_fields = ["nom", "code_postal_principal", "departement"]
+    # Utiliser startswith (et non contains) pour éviter de retourner des villes
+    # qui contiennent le terme au milieu.
+    # DRF SearchFilter supporte le préfixe '^' pour istartswith.
+    search_fields = ["^nom", "^code_postal_principal", "^departement"]
     ordering_fields = ["nom", "population", "created_at"]
     ordering = ["nom"]
 
@@ -101,7 +104,7 @@ class VilleViewSet(CRUDViewSet):
         base_qs = Ville.objects.all()
         if query:
             base_qs = base_qs.filter(
-                Q(nom__icontains=query) | Q(code_postal_principal__startswith=query)
+                Q(nom__istartswith=query) | Q(code_postal_principal__startswith=query)
             )
         if code_postal:
             base_qs = base_qs.filter(code_postal_principal=code_postal)

@@ -8,6 +8,8 @@ import logging
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
+from django.db import transaction
 from drf_spectacular.utils import OpenApiResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
@@ -37,12 +39,31 @@ class RegisterRequestSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=8)
     name = serializers.CharField(max_length=255, required=False, allow_blank=True)
     entreprise_id = serializers.UUIDField(required=False, allow_null=True)
+    siren = serializers.CharField(required=False, allow_blank=True, max_length=9)
+    siret = serializers.CharField(required=False, allow_blank=True, max_length=14)
 
     def validate_email(self, value):
         """Vérifie que l'email n'est pas déjà utilisé."""
-        if User.objects.filter(email=value).exists():
+        normalized = value.strip().lower()
+        if User.objects.filter(email=normalized).exists():
             raise serializers.ValidationError("Cet email est déjà utilisé.")
-        return value.lower()
+        return normalized
+
+    def validate_siren(self, value):
+        normalized = value.strip()
+        if not normalized:
+            return ""
+        if not normalized.isdigit() or len(normalized) != 9:
+            raise serializers.ValidationError("Le SIREN doit contenir exactement 9 chiffres.")
+        return normalized
+
+    def validate_siret(self, value):
+        normalized = value.strip()
+        if not normalized:
+            return ""
+        if not normalized.isdigit() or len(normalized) != 14:
+            raise serializers.ValidationError("Le SIRET doit contenir exactement 14 chiffres.")
+        return normalized
 
     def validate_password(self, value):
         """Valide le mot de passe avec les règles Django."""
@@ -51,6 +72,20 @@ class RegisterRequestSerializer(serializers.Serializer):
         except DjangoValidationError as e:
             raise serializers.ValidationError(list(e.messages))
         return value
+
+    def validate(self, attrs):
+        entreprise_id = attrs.get("entreprise_id")
+        siren = (attrs.get("siren") or "").strip()
+        siret = (attrs.get("siret") or "").strip()
+        if not entreprise_id and not siren and not siret:
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        "Veuillez fournir un SIREN/SIRET (ou un identifiant entreprise) pour lier votre compte."
+                    ]
+                }
+            )
+        return attrs
 
 
 class RegisterResponseSerializer(serializers.Serializer):
@@ -66,6 +101,10 @@ class LoginRequestSerializer(serializers.Serializer):
 
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
+
+    def validate_email(self, value):
+        # Ensure case/whitespace differences don't break auth lookup.
+        return value.strip().lower()
 
 
 class LoginResponseSerializer(serializers.Serializer):
@@ -151,30 +190,61 @@ def register(request):
     password = serializer.validated_data["password"]
     name = serializer.validated_data.get("name", "")
     entreprise_id = serializer.validated_data.get("entreprise_id")
+    siren = serializer.validated_data.get("siren") or ""
+    siret = serializer.validated_data.get("siret") or ""
+
+    from foxreviews.enterprise.models import Entreprise
+
+    entreprise = None
+    if entreprise_id:
+        try:
+            entreprise = Entreprise.objects.get(id=entreprise_id)
+        except Entreprise.DoesNotExist:
+            return Response(
+                {"error": "Entreprise introuvable. Veuillez vérifier votre identifiant."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        if siret:
+            entreprise = Entreprise.objects.filter(siret=siret).first()
+        if entreprise is None and siren:
+            entreprise = Entreprise.objects.filter(siren=siren).first()
+        if entreprise is None:
+            return Response(
+                {"error": "Entreprise introuvable pour ce SIREN/SIRET. Veuillez vérifier vos informations."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     try:
-        # Créer l'utilisateur
-        user = User.objects.create_user(
-            email=email,
-            password=password,
-            name=name,
-        )
+        with transaction.atomic():
+            # Créer l'utilisateur
+            user = User.objects.create_user(
+                email=email,
+                password=password,
+                name=name,
+            )
 
-        # Créer le profil
-        profile_data = {"role": UserProfile.Role.CLIENT}
-        
-        if entreprise_id:
-            from foxreviews.enterprise.models import Entreprise
-            try:
-                entreprise = Entreprise.objects.get(id=entreprise_id)
-                profile_data["entreprise"] = entreprise
-            except Entreprise.DoesNotExist:
-                logger.warning(f"Entreprise {entreprise_id} introuvable lors de l'inscription")
+            # NOTE: un signal post_save (foxreviews.userprofile.signals) crée déjà
+            # automatiquement un UserProfile à la création d'un User.
+            # Donc ici on fait un get_or_create + update des champs utiles.
+            profile_defaults = {"role": UserProfile.Role.CLIENT}
+            if entreprise is not None:
+                profile_defaults["entreprise"] = entreprise
 
-        UserProfile.objects.create(user=user, **profile_data)
+            profile, _ = UserProfile.objects.get_or_create(user=user, defaults=profile_defaults)
 
-        # Générer token
-        token, _ = Token.objects.get_or_create(user=user)
+            update_fields: list[str] = []
+            if profile.role != UserProfile.Role.CLIENT:
+                profile.role = UserProfile.Role.CLIENT
+                update_fields.append("role")
+            if entreprise is not None and profile.entreprise_id != entreprise.id:
+                profile.entreprise = entreprise
+                update_fields.append("entreprise")
+            if update_fields:
+                profile.save(update_fields=update_fields)
+
+            # Générer token
+            token, _ = Token.objects.get_or_create(user=user)
 
         logger.info(f"Nouvel utilisateur inscrit: {email}")
 
@@ -191,8 +261,15 @@ def register(request):
             status=status.HTTP_201_CREATED,
         )
 
+    except IntegrityError as e:
+        # Ex: email déjà pris (race condition), ou tentative duplicate sur UserProfile
+        logger.exception("Erreur DB lors de l'inscription: %s", e)
+        return Response(
+            {"error": "Inscription impossible (email déjà utilisé ou conflit de création)."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     except Exception as e:
-        logger.exception(f"Erreur lors de l'inscription: {e}")
+        logger.exception("Erreur lors de l'inscription: %s", e)
         return Response(
             {"error": "Erreur lors de la création du compte"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -230,9 +307,21 @@ def login(request):
     email = serializer.validated_data["email"]
     password = serializer.validated_data["password"]
 
-    user = authenticate(request, username=email, password=password)
+    # Django's ModelBackend expects "username" param, even when USERNAME_FIELD is "email".
+    # Passing both keeps compatibility with other backends (ex: allauth).
+    user = authenticate(request, username=email, email=email, password=password)
 
     if user is None:
+        # Avoid leaking details to client, but keep enough info in server logs for debugging.
+        try:
+            db_user = User.objects.only("id", "is_active", "email").get(email=email)
+            logger.warning(
+                "Login failed for %s (user exists, is_active=%s)",
+                email,
+                db_user.is_active,
+            )
+        except User.DoesNotExist:
+            logger.warning("Login failed for %s (user does not exist)", email)
         return Response(
             {"error": "Email ou mot de passe incorrect"},
             status=status.HTTP_401_UNAUTHORIZED,

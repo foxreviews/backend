@@ -72,6 +72,23 @@ class Command(BaseCommand):
             action="store_true",
             help="Traite uniquement les contenus affichant 'Aucune information'",
         )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=0,
+            help="Limiter le nombre de ProLocalisations traitées (0 = pas de limite)",
+        )
+        parser.add_argument(
+            "--proloc-id",
+            action="append",
+            default=[],
+            help="Traiter uniquement une ProLocalisation (UUID). Peut être répété.",
+        )
+        parser.add_argument(
+            "--print-text",
+            action="store_true",
+            help="Affiche le texte généré dans le terminal (recommandé avec --limit 1 ou --proloc-id)",
+        )
 
     def handle(self, *args, **options):
         batch_size = options["batch_size"]
@@ -81,6 +98,9 @@ class Command(BaseCommand):
         sponsored_only = options["sponsored_only"]
         organic_only = options["organic_only"]
         only_placeholder = options["only_placeholder"]
+        limit = int(options.get("limit") or 0)
+        proloc_ids_filter = [p for p in (options.get("proloc_id") or []) if str(p).strip()]
+        print_text = bool(options.get("print_text"))
         
         self.stdout.write(
             self.style.SUCCESS("\n🤖 GÉNÉRATION AVIS IA (DÉCLENCHEMENT INTELLIGENT)\n" + "=" * 80),
@@ -116,6 +136,10 @@ class Command(BaseCommand):
         queryset = ProLocalisation.objects.annotate(
             is_sponsored=Exists(sponsorisation_active),
         ).filter(is_active=True)
+
+        # Filtre explicite sur des IDs
+        if proloc_ids_filter:
+            queryset = queryset.filter(id__in=proloc_ids_filter)
         
         # Filtres
         if sponsored_only:
@@ -135,6 +159,10 @@ class Command(BaseCommand):
             # Filtrer pour garder uniquement ceux qui nécessitent régénération
             self.stdout.write("🎯 Filtrage intelligent (avis_vide, jamais_genere, avis_expire)...\n")
         
+        # Limite (pour preview / rendu rapide)
+        if limit > 0:
+            queryset = queryset.order_by("id")[:limit]
+
         # Récupérer IDs seulement (scalable)
         proloc_ids = list(queryset.values_list("id", "is_sponsored"))
         total = len(proloc_ids)
@@ -155,6 +183,7 @@ class Command(BaseCommand):
         # Traitement par batch
         generated = 0
         errors = 0
+        skipped_no_content = 0
         sponsored_gen = 0
         organic_gen = 0
         
@@ -213,8 +242,26 @@ class Command(BaseCommand):
                             organic_gen += 1
                         
                         self.stdout.write(self.style.SUCCESS(" ✅"))
+
+                        if print_text:
+                            self.stdout.write("\n--- TEXTE GÉNÉRÉ (preview) ---")
+                            self.stdout.write(f"proloc_id={proloc.id} | entreprise={proloc.entreprise.nom}")
+                            self.stdout.write(texte)
+                            self.stdout.write("--- FIN TEXTE ---\n")
                     else:
-                        self.stdout.write(self.style.WARNING(" ⚠️"))
+                        reason = (ai_service.last_error_details or "échec génération").replace("\n", " ")
+
+                        # Cas attendu: l'IA répond explicitement qu'elle n'a pas de contenu.
+                        # On skip (pas compté comme erreur) et on passe au suivant.
+                        if "no_content" in reason:
+                            skipped_no_content += 1
+                            self.stdout.write(self.style.WARNING(" ⏭️ (no_content)"))
+                            continue
+
+                        # Garder un message court pour les runs massifs
+                        if len(reason) > 140:
+                            reason = reason[:140] + "…"
+                        self.stdout.write(self.style.WARNING(f" ⚠️ ({reason})"))
                         errors += 1
                     
                 except Exception as e:
@@ -229,6 +276,8 @@ class Command(BaseCommand):
         self.stdout.write(f"  Total: {generated}/{total}")
         self.stdout.write(f"  🎯 Sponsorisés (PREMIUM): {sponsored_gen}")
         self.stdout.write(f"  📊 Organiques (STANDARD): {organic_gen}")
+        if skipped_no_content > 0:
+            self.stdout.write(self.style.WARNING(f"  ⏭️ no_content (skipped): {skipped_no_content}"))
         if errors > 0:
             self.stdout.write(self.style.WARNING(f"  ❌ Erreurs: {errors}"))
         

@@ -23,6 +23,8 @@ class AvisDecrypteAdmin(admin.ModelAdmin):
     list_filter = ["source", "needs_regeneration", "date_generation"]
     search_fields = ["entreprise__nom", "texte_brut", "texte_decrypte"]
     ordering = ["-date_generation"]
+    show_full_result_count = False
+    list_select_related = ["entreprise", "pro_localisation"]
     raw_id_fields = ["entreprise", "pro_localisation"]
     readonly_fields = ["date_generation", "created_at", "updated_at"]
     actions = ["mark_for_regeneration", "regenerate_selected_reviews"]

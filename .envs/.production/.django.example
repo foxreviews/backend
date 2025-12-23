@@ -1,0 +1,50 @@
+# Production env example (NO SECRETS)
+# Copy to: .envs/.production/.django
+
+# General
+# ------------------------------------------------------------------------------
+USE_DOCKER=yes
+DJANGO_SETTINGS_MODULE=config.settings.production
+DJANGO_DEBUG=False
+
+# Django
+# ------------------------------------------------------------------------------
+DJANGO_SECRET_KEY=change-me
+DJANGO_ADMIN_URL=admin/
+DJANGO_ALLOWED_HOSTS=api.fox-reviews.com,fox-reviews.com,www.fox-reviews.com
+DJANGO_CSRF_TRUSTED_ORIGINS=https://api.fox-reviews.com,https://fox-reviews.com,https://www.fox-reviews.com
+DJANGO_CORS_ALLOWED_ORIGINS=https://fox-reviews.com,https://www.fox-reviews.com
+DJANGO_CORS_ALLOW_CREDENTIALS=True
+DJANGO_SECURE_SSL_REDIRECT=True
+
+# Optional providers (we don't use AWS/Mailgun/Sentry)
+# ------------------------------------------------------------------------------
+DJANGO_USE_S3_STORAGE=False
+DJANGO_USE_MAILGUN=False
+DJANGO_USE_SENTRY=False
+
+# Observability
+# ------------------------------------------------------------------------------
+PROMETHEUS_METRICS_ENABLED=True
+
+# Redis
+# ------------------------------------------------------------------------------
+REDIS_URL=redis://redis:6379/0
+
+# Celery / Flower
+# ------------------------------------------------------------------------------
+CELERY_FLOWER_USER=change-me
+CELERY_FLOWER_PASSWORD=change-me
+
+# INSEE Sirene API
+# ------------------------------------------------------------------------------
+INSEE_API_KEY=change-me
+INSEE_TIMEOUT=30
+
+# AI Service (same contract as local)
+# ------------------------------------------------------------------------------
+AI_SERVICE_URL=http://agent_app_local:8000
+AI_SERVICE_TIMEOUT=180
+AI_SERVICE_API_KEY=change-me
+
+# If you ever enable providers above, add the required env vars here.

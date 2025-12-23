@@ -1,0 +1,47 @@
+{% extends "admin/change_list.html" %}
+{% load i18n static %}
+
+{% block content_title %}
+    <h1>{{ title }}</h1>
+    
+    {% if billing_metrics %}
+    <div class="billing-metrics" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #4CAF50;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">Abonnements actifs</div>
+            <div style="font-size: 24px; font-weight: bold; color: #4CAF50;">{{ billing_metrics.active_subscriptions }}</div>
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #2196F3;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">MRR (Mensuel)</div>
+            <div style="font-size: 24px; font-weight: bold; color: #2196F3;">{{ billing_metrics.mrr }}</div>
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #9C27B0;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">ARR (Annuel)</div>
+            <div style="font-size: 24px; font-weight: bold; color: #9C27B0;">{{ billing_metrics.arr }}</div>
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #FF9800;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">Taux de churn</div>
+            <div style="font-size: 24px; font-weight: bold; color: #FF9800;">{{ billing_metrics.churn_rate }}</div>
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #f44336;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">Paiements échoués</div>
+            <div style="font-size: 24px; font-weight: bold; color: #f44336;">{{ billing_metrics.failed_payments }}</div>
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #00BCD4;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">Nouveaux ce mois</div>
+            <div style="font-size: 24px; font-weight: bold; color: #00BCD4;">{{ billing_metrics.new_subscriptions }}</div>
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #8BC34A;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">Revenus ce mois</div>
+            <div style="font-size: 24px; font-weight: bold; color: #8BC34A;">{{ billing_metrics.monthly_revenue }}</div>
+        </div>
+        
+    </div>
+    {% endif %}
+{% endblock %}

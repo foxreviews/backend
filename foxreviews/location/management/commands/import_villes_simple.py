@@ -22,6 +22,16 @@ from foxreviews.location.models import Ville
 class Command(BaseCommand):
     help = "Importe les villes depuis un fichier CSV simple (Nom + Code Postal)"
 
+    def _normalize_cp(self, value) -> str:
+        raw = ("" if value is None else str(value)).strip()
+        m5 = re.search(r"\d{5}", raw)
+        if m5:
+            return m5.group(0)
+        m4 = re.search(r"\d{4}", raw)
+        if m4:
+            return m4.group(0).zfill(5)
+        return ""
+
     def add_arguments(self, parser):
         parser.add_argument(
             "csv_file",
@@ -72,15 +82,11 @@ class Command(BaseCommand):
                             continue
 
                         nom = match.group(1).strip()
-                        code_postal = match.group(2).strip()
+                        code_postal_raw = match.group(2).strip()
+                        code_postal = self._normalize_cp(code_postal_raw) or code_postal_raw
 
-                        # Extraire le département des 2 premiers chiffres du code postal
-                        if len(code_postal) == 5:
-                            departement = code_postal[:2]
-                        elif len(code_postal) == 4:
-                            departement = "0" + code_postal[0]
-                        else:
-                            departement = ""
+                        # Extraire le département des 2 premiers chiffres du code postal (après padding)
+                        departement = code_postal[:2] if len(code_postal) == 5 else ""
 
                         # Générer le slug
                         slug = slugify(f"{nom}-{code_postal}")
