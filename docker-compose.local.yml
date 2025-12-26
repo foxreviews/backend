@@ -57,7 +57,7 @@ services:
       - default
 
   redis:
-    image: docker.io/redis:7.2
+    image: docker.io/redis:8.4
     container_name: foxreviews_local_redis
     volumes:
       - foxreviews_local_redis_data:/data
