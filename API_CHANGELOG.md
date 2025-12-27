@@ -121,7 +121,7 @@ Si l'entreprise est introuvable, l'API renvoie `400` (inscription refusée).
 - `/api/sponsorisations/` (GET)
 - `/api/stripe/create-checkout/` (POST)
 - `/api/stripe/webhook/` (POST)
-- `/api/dashboard/` (GET)
+- `/api/dashboard/` (GET) — Note: `stats.rotation_position` est désormais un **% Top20 (0–100)**, pas une position.
 - `/api/users/` (GET)
 - `/api/users/{id}/` (GET)
 

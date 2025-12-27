@@ -54,14 +54,51 @@
 
 ---
 
-## 🏢 Entreprises (existant, complété)
+## 🏢 Entreprises
 
 | Méthode | Endpoint | Auth | Permission | Description |
 |---------|----------|------|------------|-------------|
-| `GET` | `/api/entreprises/` | ❌ Public | - | Liste entreprises |
-| `GET` | `/api/entreprises/{id}/` | ❌ Public | - | Détail entreprise |
+| `GET` | `/api/entreprises/` | ❌ Public | - | Liste entreprises (cursor pagination) |
+| `GET` | `/api/entreprises/{id}/` | ❌ Public | - | Détail entreprise avec dirigeants |
+| `GET` | `/api/entreprises/search/` | ❌ Public | - | Recherche pour inscription (nom + CP) |
 | `POST` | `/api/entreprises/` | ✅ Token | `IsAdminOrManager` | Créer entreprise |
 | `PUT` | `/api/entreprises/{id}/` | ✅ Token | `IsOwnerOrAdmin` | Modifier entreprise |
+| `POST` | `/api/entreprises/{id}/upload_avis/` | ✅ Token | - | Upload avis de remplacement |
+
+**Détail entreprise (`GET /api/entreprises/{id}/`) inclut:**
+- `dirigeants`: Liste des dirigeants (personnes physiques/morales)
+- `enrichi_dirigeants`: Boolean indiquant si les dirigeants ont été enrichis
+- `naf_sous_categorie`: Sous-catégorie lisible déduite du code NAF
+
+**Exemple réponse détail:**
+```json
+{
+  "id": "uuid",
+  "siren": "123456789",
+  "siret": "12345678900011",
+  "nom": "Plomberie Dupont",
+  "naf_code": "43.22A",
+  "naf_sous_categorie": {
+    "slug": "plombier",
+    "nom": "Plombier",
+    "categorie": {
+      "slug": "batiment",
+      "nom": "Bâtiment & Travaux"
+    }
+  },
+  "dirigeants": [
+    {
+      "id": "uuid",
+      "type_dirigeant": "personne physique",
+      "nom": "DUPONT",
+      "prenoms": "Jean",
+      "nom_complet": "Jean DUPONT",
+      "qualite": "Gérant"
+    }
+  ],
+  "enrichi_dirigeants": true
+}
+```
 
 ---
 
@@ -79,13 +116,71 @@
 |---------|----------|------|-------------|
 | `GET` | `/api/dashboard/` | ✅ Token | Dashboard entreprise client |
 
+Note: `stats.rotation_position` est un **pourcentage estimé d'apparition dans le Top 20** (0–100), basé sur la mécanique de `/api/search`.
+
 ---
 
-## 📦 Autres endpoints existants
+## 📦 Catégories & Sous-catégories
 
 ### Catégories
-- `GET /api/categories/`
-- `GET /api/sous-categories/`
+| Méthode | Endpoint | Auth | Description |
+|---------|----------|------|-------------|
+| `GET` | `/api/categories/` | ❌ Public | Liste des catégories |
+| `GET` | `/api/categories/{id}/` | ❌ Public | Détail catégorie avec sous-catégories |
+| `GET` | `/api/categories/autocomplete/?q=...` | ❌ Public | Autocomplete catégories |
+| `GET` | `/api/categories/stats/` | ❌ Public | Statistiques catégories |
+
+### Sous-catégories
+| Méthode | Endpoint | Auth | Description |
+|---------|----------|------|-------------|
+| `GET` | `/api/sous-categories/` | ❌ Public | Liste des sous-catégories |
+| `GET` | `/api/sous-categories/{id}/` | ❌ Public | Détail sous-catégorie |
+| `GET` | `/api/sous-categories/autocomplete/?q=...` | ❌ Public | Autocomplete sous-catégories |
+| `GET` | `/api/sous-categories/lookup/?nom=...` | ❌ Public | Lookup par nom exact |
+| `GET` | `/api/sous-categories/naf_lookup/?naf=...` | ❌ Public | **Lookup par code NAF** |
+| `GET` | `/api/sous-categories/stats/` | ❌ Public | Statistiques sous-catégories |
+
+### NAF → Sous-catégorie Mapping
+
+L'endpoint `naf_lookup` permet de convertir un code NAF en sous-catégorie lisible.
+
+**Couverture:** 95.5% des entreprises françaises (168 codes NAF mappés)
+
+**Exemple:**
+```bash
+GET /api/sous-categories/naf_lookup/?naf=43.22A
+```
+
+**Réponse:**
+```json
+{
+  "naf_code": "43.22A",
+  "sous_categorie": {
+    "id": "uuid",
+    "slug": "plombier",
+    "nom": "Plombier"
+  },
+  "categorie": {
+    "id": "uuid",
+    "slug": "batiment",
+    "nom": "Bâtiment & Travaux"
+  }
+}
+```
+
+**Codes NAF courants:**
+| Code NAF | Sous-catégorie | Catégorie |
+|----------|----------------|-----------|
+| 43.22A | plombier | Bâtiment & Travaux |
+| 62.01Z | developpement-web | Informatique & Digital |
+| 56.10A | restaurant | Restauration & Alimentation |
+| 96.02A | coiffure | Beauté & Bien-être |
+| 68.31Z | agence-immobiliere | Immobilier |
+| 00.00Z | autre-activite | Autres Activités |
+
+---
+
+## 📦 Autres endpoints
 
 ### Villes
 - `GET /api/villes/`
@@ -224,16 +319,74 @@ console.log(stats);
 //   "entreprise_id": "...",
 //   "entreprise_nom": "...",
 //   "total": { "clicks": 1234, "views": 5678 },
-//   "last_30_days": { 
-//     "clicks": 123, 
-//     "views": 456, 
-//     "ctr": 26.97 
+//   "last_30_days": {
+//     "clicks": 123,
+//     "views": 456,
+//     "ctr": 26.97
 //   },
 //   "clicks_by_source": [
 //     { "source": "seo", "count": 50 },
 //     { "source": "sponsorisation", "count": 30 }
 //   ]
 // }
+```
+
+### 7. Lookup NAF → Sous-catégorie
+
+```javascript
+// Convertir un code NAF en sous-catégorie lisible
+const nafResponse = await fetch('/api/sous-categories/naf_lookup/?naf=43.22A');
+const nafData = await nafResponse.json();
+
+console.log(nafData);
+// {
+//   "naf_code": "43.22A",
+//   "sous_categorie": {
+//     "id": "uuid",
+//     "slug": "plombier",
+//     "nom": "Plombier"
+//   },
+//   "categorie": {
+//     "id": "uuid",
+//     "slug": "batiment",
+//     "nom": "Bâtiment & Travaux"
+//   }
+// }
+```
+
+### 8. Récupérer les dirigeants d'une entreprise
+
+```javascript
+// Les dirigeants sont inclus dans le détail de l'entreprise
+const entreprise = await fetch('/api/entreprises/{id}/').then(r => r.json());
+
+console.log(entreprise.dirigeants);
+// [
+//   {
+//     "id": "uuid",
+//     "type_dirigeant": "personne physique",
+//     "nom": "DUPONT",
+//     "prenoms": "Jean",
+//     "nom_complet": "Jean DUPONT",
+//     "qualite": "Gérant",
+//     "nationalite": "Française"
+//   },
+//   {
+//     "id": "uuid",
+//     "type_dirigeant": "personne morale",
+//     "denomination": "Holding ABC",
+//     "nom_complet": "Holding ABC",
+//     "qualite": "Associé",
+//     "siren_dirigeant": "987654321"
+//   }
+// ]
+
+// Vérifier si les dirigeants ont été enrichis
+if (entreprise.enrichi_dirigeants) {
+  console.log("Dirigeants à jour");
+} else {
+  console.log("Dirigeants non enrichis (données peuvent être incomplètes)");
+}
 ```
 
 ---
@@ -263,17 +416,28 @@ console.log(stats);
 
 Pour intégrer le backend depuis le frontend:
 
+### Authentification
 - [ ] Implémenter register/login
 - [ ] Stocker le token (localStorage/sessionStorage)
 - [ ] Ajouter header `Authorization: Token {token}` aux requêtes authentifiées
+
+### Tracking
 - [ ] Implémenter tracking clics (appel public sans auth)
 - [ ] Implémenter tracking vues (appel public sans auth)
+- [ ] Afficher les stats tracking (GET /api/billing/track/stats/)
+
+### Pages client
 - [ ] Créer page "Mon compte" (GET /api/account/me/)
 - [ ] Créer page "Mon abonnement" (GET /api/billing/subscription/)
 - [ ] Créer page "Mes factures" (GET /api/billing/invoices/)
 - [ ] Créer bouton "S'abonner" (POST /api/stripe/create-checkout/)
 - [ ] Gérer la redirection Stripe après paiement
-- [ ] Afficher les stats tracking (GET /api/billing/track/stats/)
+
+### Entreprises & Catégories
+- [ ] Afficher les dirigeants sur la fiche entreprise
+- [ ] Utiliser `naf_sous_categorie` pour afficher la catégorie lisible
+- [ ] Implémenter l'autocomplete catégories/sous-catégories
+- [ ] Utiliser NAF lookup pour le formulaire de création d'entreprise
 
 ---
 

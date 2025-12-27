@@ -247,14 +247,15 @@ def create_customer_portal_session(request):
     return_url = request.data.get("return_url", request.build_absolute_uri("/"))
     
     try:
-        # Récupérer l'entreprise de l'utilisateur
-        # Adaptez selon votre logique d'authentification
         from foxreviews.enterprise.models import Entreprise
-        
-        # Exemple: si l'user a une relation avec entreprise
-        entreprise = Entreprise.objects.filter(
-            pro_localisations__subscriptions__user=request.user
-        ).first()
+
+        entreprise = None
+        if hasattr(request.user, "profile"):
+            entreprise = getattr(request.user.profile, "entreprise", None)
+
+        # Fallback legacy: anciens comptes liés via email_contact.
+        if not entreprise:
+            entreprise = Entreprise.objects.filter(email_contact=request.user.email).first()
         
         if not entreprise:
             return Response(

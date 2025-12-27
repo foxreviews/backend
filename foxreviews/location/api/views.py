@@ -9,6 +9,8 @@ from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 from foxreviews.core.pagination import ResultsPageNumberPagination, VilleCursorPagination
 from foxreviews.core.permissions import IsAdminOrReadOnly
@@ -53,6 +55,16 @@ class VilleViewSet(CRUDViewSet):
     ordering_fields = ["nom", "population", "created_at"]
     ordering = ["nom"]
 
+    @extend_schema(
+        summary="Autocomplete villes",
+        parameters=[
+            OpenApiParameter(name="q", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Terme de recherche (min 2 caractères)", required=True),
+            OpenApiParameter(name="code_postal", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Filtrer par code postal", required=False),
+            OpenApiParameter(name="region", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Filtrer par région", required=False),
+            OpenApiParameter(name="departement", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Filtrer par département", required=False),
+            OpenApiParameter(name="limit", location=OpenApiParameter.QUERY, type=OpenApiTypes.INT, description="Nombre max de résultats", required=False),
+        ],
+    )
     @action(detail=False, methods=["get"], throttle_classes=[AutocompleteThrottle])
     def autocomplete(self, request):
         """
@@ -140,6 +152,13 @@ class VilleViewSet(CRUDViewSet):
 
         return Response(results)
 
+    @extend_schema(
+        summary="Lookup ville par nom exact",
+        parameters=[
+            OpenApiParameter(name="nom", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Nom exact de la ville", required=True),
+            OpenApiParameter(name="code_postal", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Code postal (optionnel)", required=False),
+        ],
+    )
     @action(detail=False, methods=["get"], throttle_classes=[AutocompleteThrottle])
     def lookup(self, request):
         """

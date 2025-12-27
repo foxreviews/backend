@@ -118,6 +118,8 @@ curl -H "Authorization: Token YOUR_TOKEN" \
      http://localhost:8000/api/dashboard/
 ```
 
+Note: `stats.rotation_position` correspond à un **pourcentage estimé d'apparition dans le Top 20** (valeur 0–100), pas à une position fixe.
+
 #### 3. Upload avis
 ```bash
 curl -X POST \

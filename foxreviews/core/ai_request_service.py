@@ -11,6 +11,8 @@ import uuid
 import os
 from datetime import timedelta
 
+from typing import Any
+
 import requests
 from django.conf import settings
 from django.utils import timezone
@@ -49,6 +51,86 @@ class AIRequestService:
 
         # Dernière erreur rencontrée (utilisé par les commandes pour expliquer un ⚠️)
         self.last_error_details: str | None = None
+
+    def _host_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if self.api_key:
+            headers["X-Host-Header"] = self.api_key
+        return headers
+
+    def _safe_json_or_text(self, response: requests.Response) -> dict[str, Any] | list[Any] | str:
+        try:
+            return response.json()
+        except Exception:
+            return (response.text or "").strip()
+
+    def ingest_review_document(
+        self,
+        *,
+        company_id: str,
+        company_name: str | None,
+        file_obj,
+        filename: str,
+        content_type: str | None = None,
+    ) -> tuple[int, dict[str, Any] | str]:
+        """Appelle l'Agent: POST /api/v1/reviews/ingest-document (multipart/form-data)."""
+
+        url = f"{(self.ai_url or '').rstrip('/')}/api/v1/reviews/ingest-document"
+        data = {"company_id": company_id}
+        if company_name:
+            data["company_name"] = company_name
+
+        files = {
+            "file": (
+                filename or "document",
+                file_obj,
+                content_type or "application/octet-stream",
+            )
+        }
+
+        response = requests.post(
+            url,
+            data=data,
+            files=files,
+            headers=self._host_headers(),
+            timeout=(5, self.ai_timeout),
+        )
+
+        payload = self._safe_json_or_text(response)
+        return response.status_code, payload if isinstance(payload, (dict, list)) else str(payload)
+
+    def list_ingested_review_documents(
+        self,
+        *,
+        company_id: str,
+        limit: int = 20,
+    ) -> tuple[int, list[Any] | dict[str, Any] | str]:
+        """Appelle l'Agent: GET /api/v1/reviews/ingested-documents."""
+
+        url = f"{(self.ai_url or '').rstrip('/')}/api/v1/reviews/ingested-documents"
+        response = requests.get(
+            url,
+            params={"company_id": company_id, "limit": int(limit)},
+            headers=self._host_headers(),
+            timeout=(5, self.ai_timeout),
+        )
+        return response.status_code, self._safe_json_or_text(response)
+
+    def get_ingested_review_document(
+        self,
+        *,
+        document_id: int,
+    ) -> tuple[int, dict[str, Any] | str]:
+        """Appelle l'Agent: GET /api/v1/reviews/ingested-documents/{document_id}."""
+
+        url = f"{(self.ai_url or '').rstrip('/')}/api/v1/reviews/ingested-documents/{int(document_id)}"
+        response = requests.get(
+            url,
+            headers=self._host_headers(),
+            timeout=(5, self.ai_timeout),
+        )
+        payload = self._safe_json_or_text(response)
+        return response.status_code, payload if isinstance(payload, dict) else str(payload)
     
     def should_regenerate(self, prolocalisation: ProLocalisation) -> tuple[bool, str]:
         """
@@ -317,6 +399,7 @@ class AIRequestService:
         prolocalisation: ProLocalisation,
         quality: str = "standard",
         force: bool = False,
+        context: dict | None = None,
     ) -> tuple[bool, str | None]:
         """
         Pipeline complet: vérification + préparation + envoi + sauvegarde.
@@ -347,7 +430,7 @@ class AIRequestService:
                     return False, None
             
             # Préparer payload
-            payload = self.prepare_payload(prolocalisation, quality=quality)
+            payload = self.prepare_payload(prolocalisation, quality=quality, context=context)
             
             # Envoyer requête
             response = self.send_request(payload)

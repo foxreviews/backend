@@ -32,6 +32,11 @@ class Entreprise(BaseModel):
         db_index=True,
         help_text=_("Données enrichies via API INSEE"),
     )
+    enrichi_dirigeants = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text=_("Dirigeants enrichis via API Recherche Entreprises"),
+    )
     siret = models.CharField(
         max_length=14,
         null=True,
@@ -143,6 +148,7 @@ class Entreprise(BaseModel):
             models.Index(fields=["google_place_id"]),
             models.Index(fields=["latitude", "longitude"]),
             models.Index(fields=["siren_temporaire", "enrichi_insee"]),
+            models.Index(fields=["enrichi_dirigeants"]),
         ]
 
     def __str__(self):
@@ -190,6 +196,11 @@ class ProLocalisation(BaseModel):
         null=True,
         blank=True,
         help_text=_("Date de la dernière génération IA du contenu"),
+    )
+    faq = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=_("FAQ (15 Questions/Réponses) générées par IA - format: [{question, reponse}, ...]"),
     )
 
     # Scores et notes
@@ -248,3 +259,92 @@ class ProLocalisation(BaseModel):
 
         self.score_global = score_note + score_avis + score_verified
         self.save(update_fields=["score_global", "updated_at"])
+
+
+class Dirigeant(BaseModel):
+    """
+    Dirigeant d'une entreprise.
+    Source: API Recherche Entreprises (api.gouv.fr).
+    """
+
+    TYPE_PERSONNE_PHYSIQUE = "personne physique"
+    TYPE_PERSONNE_MORALE = "personne morale"
+    TYPE_CHOICES = [
+        (TYPE_PERSONNE_PHYSIQUE, _("Personne physique")),
+        (TYPE_PERSONNE_MORALE, _("Personne morale")),
+    ]
+
+    entreprise = models.ForeignKey(
+        Entreprise,
+        on_delete=models.CASCADE,
+        related_name="dirigeants",
+    )
+    type_dirigeant = models.CharField(
+        max_length=20,
+        choices=TYPE_CHOICES,
+        default=TYPE_PERSONNE_PHYSIQUE,
+        help_text=_("Type de dirigeant"),
+    )
+
+    # Personne physique
+    nom = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Nom de famille"),
+    )
+    prenoms = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Prénoms"),
+    )
+    date_de_naissance = models.CharField(
+        max_length=10,
+        blank=True,
+        help_text=_("Date de naissance (YYYY-MM ou YYYY)"),
+    )
+    nationalite = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text=_("Nationalité"),
+    )
+
+    # Personne morale
+    siren_dirigeant = models.CharField(
+        max_length=9,
+        blank=True,
+        db_index=True,
+        help_text=_("SIREN de la personne morale dirigeante"),
+    )
+    denomination = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Dénomination de la personne morale"),
+    )
+
+    # Commun
+    qualite = models.CharField(
+        max_length=255,
+        help_text=_("Qualité/fonction (Président, Gérant, etc.)"),
+    )
+
+    class Meta:
+        verbose_name = _("Dirigeant")
+        verbose_name_plural = _("Dirigeants")
+        ordering = ["entreprise", "qualite", "nom"]
+        indexes = [
+            models.Index(fields=["entreprise", "type_dirigeant"]),
+            models.Index(fields=["nom", "prenoms"]),
+            models.Index(fields=["qualite"]),
+        ]
+
+    def __str__(self):
+        if self.type_dirigeant == self.TYPE_PERSONNE_PHYSIQUE:
+            return f"{self.prenoms} {self.nom} - {self.qualite}"
+        return f"{self.denomination} - {self.qualite}"
+
+    @property
+    def nom_complet(self) -> str:
+        """Retourne le nom complet du dirigeant."""
+        if self.type_dirigeant == self.TYPE_PERSONNE_PHYSIQUE:
+            return f"{self.prenoms} {self.nom}".strip()
+        return self.denomination

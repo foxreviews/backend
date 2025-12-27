@@ -17,6 +17,7 @@ import logging
 
 from celery import shared_task
 from django.conf import settings
+from django.utils import timezone
 
 from foxreviews.core.ai_service import AIService
 from foxreviews.core.ai_service import AIServiceError
@@ -25,6 +26,105 @@ from foxreviews.core.models_checkpoint import ImportBatch
 from foxreviews.enterprise.models import ProLocalisation
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(bind=True, name="reviews.generate_avis_decrypte_for_avis")
+def generate_avis_decrypte_for_avis(self, avis_id: str):
+    """Génère un avis décrypté pour un avis client validé.
+
+    Cette tâche est déclenchée automatiquement quand un avis passe
+    en statut 'valide' via le signal.
+    """
+    from foxreviews.reviews.models import Avis, AvisDecrypte
+
+    try:
+        avis = Avis.objects.select_related(
+            "entreprise",
+            "pro_localisation",
+            "pro_localisation__sous_categorie__categorie",
+            "pro_localisation__ville",
+        ).get(id=avis_id)
+    except Avis.DoesNotExist:
+        logger.error("Avis %s introuvable", avis_id)
+        return {"success": False, "error": "avis_not_found"}
+
+    # Vérifier qu'on a une ProLocalisation
+    pro_loc = avis.pro_localisation
+    if not pro_loc:
+        # Essayer de trouver ou créer une ProLocalisation
+        from foxreviews.enterprise.models import ProLocalisation as ProLoc
+
+        pro_loc = ProLoc.objects.filter(
+            entreprise=avis.entreprise,
+            is_active=True,
+        ).first()
+
+        if pro_loc:
+            avis.pro_localisation = pro_loc
+            avis.save(update_fields=["pro_localisation"])
+        else:
+            logger.warning("Pas de ProLocalisation pour l'avis %s", avis_id)
+            Avis.objects.filter(pk=avis.pk).update(
+                statut=Avis.StatutChoices.PUBLIE,
+            )
+            return {"success": False, "error": "no_prolocalisation"}
+
+    # Lancer la génération IA
+    try:
+        ai = AIService()
+        job_id = ai.start_decryptage_avis_job(pro_loc=pro_loc, angle="SEO")
+
+        # Attendre le résultat (polling synchrone pour simplifier)
+        import time
+        max_attempts = 60
+        for attempt in range(max_attempts):
+            data = ai.get_job_status(job_id)
+            status = (data or {}).get("status")
+
+            if status == "done":
+                # Appliquer le résultat
+                avis_decrypte, payload = ai.apply_decryptage_avis_result(
+                    pro_loc=pro_loc,
+                    job_id=job_id,
+                    job_payload=data,
+                )
+
+                # Lier l'avis décrypté à l'avis source
+                if avis_decrypte:
+                    avis.avis_decrypte = avis_decrypte
+                    avis.statut = Avis.StatutChoices.PUBLIE
+                    avis.save(update_fields=["avis_decrypte", "statut"])
+
+                logger.info("Avis décrypté généré pour avis %s", avis_id)
+                return {
+                    "success": True,
+                    "avis_id": str(avis_id),
+                    "avis_decrypte_id": str(avis_decrypte.id) if avis_decrypte else None,
+                }
+
+            elif status == "failed":
+                error = (data or {}).get("error", "unknown")
+                logger.error("Génération IA échouée pour avis %s: %s", avis_id, error)
+                Avis.objects.filter(pk=avis.pk).update(
+                    statut=Avis.StatutChoices.VALIDE,  # Remettre en validé pour retry
+                )
+                return {"success": False, "error": error}
+
+            time.sleep(5)
+
+        # Timeout
+        logger.error("Timeout génération IA pour avis %s", avis_id)
+        Avis.objects.filter(pk=avis.pk).update(
+            statut=Avis.StatutChoices.VALIDE,
+        )
+        return {"success": False, "error": "timeout"}
+
+    except Exception as e:
+        logger.exception("Erreur génération IA pour avis %s", avis_id)
+        Avis.objects.filter(pk=avis.pk).update(
+            statut=Avis.StatutChoices.VALIDE,
+        )
+        return {"success": False, "error": str(e)}
 
 
 BATCH_TYPE_DECRYPTAGE_AVIS = "generation_ia_decryptage_avis"
