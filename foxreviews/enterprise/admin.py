@@ -31,10 +31,9 @@ class EntrepriseAdmin(admin.ModelAdmin):
         "created_at",
     ]
     list_filter = ["is_active", "naf_code", "created_at"]
-    # Sur une table à plusieurs millions de lignes, la recherche "icontains" sur
-    # des champs texte et le tri alphabétique coûtent très cher.
-    # On privilégie donc les identifiants (siren/siret) en exact match.
-    search_fields = ["=siren", "=siret"]
+    # Recherche par nom (icontains), SIREN/SIRET exact, code postal exact
+    # Note: sur une table de millions de lignes, éviter trop de recherches icontains
+    search_fields = ["nom__icontains", "=siren", "=siret", "=code_postal"]
     ordering = ["id"]
     show_full_result_count = False
     list_per_page = 50

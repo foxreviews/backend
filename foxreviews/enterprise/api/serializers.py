@@ -19,6 +19,7 @@ class EntrepriseListSerializer(serializers.ModelSerializer):
             "siret",
             "nom",
             "nom_commercial",
+            "site_web",
             "ville_nom",
             "code_postal",
             "is_active",
@@ -35,6 +36,8 @@ class EntrepriseDetailSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
+    naf_sous_categorie = serializers.SerializerMethodField()
+
     class Meta:
         model = Entreprise
         fields = [
@@ -48,6 +51,7 @@ class EntrepriseDetailSerializer(serializers.ModelSerializer):
             "ville_nom",
             "naf_code",
             "naf_libelle",
+            "naf_sous_categorie",
             "telephone",
             "email_contact",
             "site_web",
@@ -57,6 +61,91 @@ class EntrepriseDetailSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_naf_sous_categorie(self, obj):
+        """Expose une sous-catégorie lisible à partir du code NAF (si mappé)."""
+        from foxreviews.subcategory.naf_mapping import get_subcategory_from_naf
+
+        sous_categorie = get_subcategory_from_naf(getattr(obj, "naf_code", None))
+        if not sous_categorie:
+            return None
+
+        return {
+            "slug": sous_categorie.slug,
+            "nom": sous_categorie.nom,
+            "categorie": {
+                "slug": sous_categorie.categorie.slug,
+                "nom": sous_categorie.categorie.nom,
+            },
+        }
+
+
+class EntrepriseSearchSerializer(serializers.ModelSerializer):
+    """Serializer pour recherche d'entreprise avec ProLocalisations (inscription client)."""
+
+    pro_localisations = serializers.SerializerMethodField()
+    naf_sous_categorie = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Entreprise
+        fields = [
+            "id",
+            "siren",
+            "siret",
+            "nom",
+            "nom_commercial",
+            "adresse",
+            "code_postal",
+            "ville_nom",
+            "naf_code",
+            "naf_sous_categorie",
+            "site_web",
+            "pro_localisations",
+        ]
+
+    def get_naf_sous_categorie(self, obj):
+        """Expose une sous-catégorie lisible à partir du code NAF (si mappé)."""
+        from foxreviews.subcategory.naf_mapping import get_subcategory_from_naf
+
+        sous_categorie = get_subcategory_from_naf(getattr(obj, "naf_code", None))
+        if not sous_categorie:
+            return None
+
+        return {
+            "slug": sous_categorie.slug,
+            "nom": sous_categorie.nom,
+            "categorie": {
+                "slug": sous_categorie.categorie.slug,
+                "nom": sous_categorie.categorie.nom,
+            },
+        }
+
+    def get_pro_localisations(self, obj):
+        """Retourne les ProLocalisations actives avec détails pour le dashboard."""
+        pro_locs = obj.pro_localisations.filter(is_active=True).select_related(
+            'sous_categorie', 'ville'
+        )
+        
+        return [
+            {
+                "id": pl.id,
+                "sous_categorie": {
+                    "id": pl.sous_categorie.id,
+                    "nom": pl.sous_categorie.nom,
+                    "slug": pl.sous_categorie.slug,
+                } if pl.sous_categorie else None,
+                "ville": {
+                    "id": pl.ville.id,
+                    "nom": pl.ville.nom,
+                    "slug": pl.ville.slug,
+                    "code_postal": pl.ville.code_postal_principal,
+                } if pl.ville else None,
+                "note_moyenne": float(pl.note_moyenne) if pl.note_moyenne else None,
+                "nb_avis": pl.nb_avis,
+                "is_verified": pl.is_verified,
+            }
+            for pl in pro_locs
+        ]
 
 
 class ProLocalisationListSerializer(serializers.ModelSerializer):
@@ -68,6 +157,11 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
     )
     siren = serializers.CharField(source="entreprise.siren", read_only=True)
     siret = serializers.CharField(source="entreprise.siret", read_only=True)
+    entreprise_site_web = serializers.CharField(
+        source="entreprise.site_web",
+        read_only=True,
+        allow_blank=True,
+    )
     sous_categorie_nom = serializers.CharField(
         source="sous_categorie.nom",
         read_only=True,
@@ -84,6 +178,7 @@ class ProLocalisationListSerializer(serializers.ModelSerializer):
             "entreprise_nom",
             "siren",
             "siret",
+            "entreprise_site_web",
             "sous_categorie",
             "sous_categorie_nom",
             "ville",
@@ -119,6 +214,7 @@ class SearchResultSerializer(serializers.ModelSerializer):
     nom = serializers.CharField(source="entreprise.nom", read_only=True)
     siren = serializers.CharField(source="entreprise.siren", read_only=True)
     siret = serializers.CharField(source="entreprise.siret", read_only=True)
+    site_web = serializers.CharField(source="entreprise.site_web", read_only=True, allow_blank=True)
     slug = serializers.SerializerMethodField()
     ville = serializers.CharField(source="ville.nom", read_only=True)
     categorie = serializers.CharField(
@@ -141,6 +237,7 @@ class SearchResultSerializer(serializers.ModelSerializer):
             "nom",
             "siren",
             "siret",
+            "site_web",
             "slug",
             "ville",
             "categorie",

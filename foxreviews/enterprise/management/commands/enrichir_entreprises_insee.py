@@ -380,13 +380,17 @@ class Command(BaseCommand):
         return self._search_insee_by_name_address(entreprise.id, best_name, code_postal, workers)
 
     def _normalize_name_for_insee(self, nom: str) -> str:
-        """Normalise le nom pour la recherche INSEE (sans guillemets stricts)."""
+        """Normalise le nom pour la recherche INSEE (sans accents ni caractères spéciaux)."""
         if not nom:
             return ""
         
-        # Supprimer les caractères spéciaux qui posent problème dans les queries
+        # Supprimer les accents (crucial pour API INSEE)
+        import unicodedata
         nom = nom.strip()
-        # Remplacer les caractères problématiques
+        nom = unicodedata.normalize('NFD', nom)
+        nom = ''.join(c for c in nom if unicodedata.category(c) != 'Mn')
+        
+        # Remplacer les caractères problématiques pour Lucene
         nom = nom.replace('"', ' ')
         nom = nom.replace("'", ' ')
         nom = nom.replace('(', ' ')
@@ -419,7 +423,20 @@ class Command(BaseCommand):
         # Supprimer les espaces multiples
         nom = ' '.join(nom.split())
         
-        return nom
+        # Filtrer les mots courants pour améliorer la recherche
+        mots_a_ignorer = {
+            'le', 'la', 'les', 'de', 'du', 'des', 'un', 'une', 
+            'et', 'ou', 'a', 'au', 'aux', 'en', 'pour',
+            'sarl', 'sas', 'sasu', 'eurl', 'sa', 'sci'
+        }
+        
+        # Garder uniquement les mots significatifs (3+ caractères et non courants)
+        mots = [
+            mot for mot in nom.split()
+            if len(mot) >= 3 and mot.lower() not in mots_a_ignorer
+        ]
+        
+        return ' '.join(mots)
 
     def _search_insee_by_name_address(self, entreprise_id, nom, code_postal, workers: int):
         """
@@ -433,7 +450,7 @@ class Command(BaseCommand):
 
         base_url = "https://api.insee.fr/api-sirene/3.11/siret"
 
-        # Normaliser le nom (supprimer caractères spéciaux)
+        # Normaliser le nom (supprimer caractères spéciaux et mots courants)
         safe_nom = self._normalize_name_for_insee(nom)
         safe_cp = self._normalize_cp(code_postal)
 
@@ -441,11 +458,17 @@ class Command(BaseCommand):
             self._http_note("by_name", "SKIP")
             return None
 
-        # Utiliser une recherche par mots-clés sans guillemets stricts
-        # pour éviter les erreurs 400 et augmenter les chances de match
+        # Syntaxe Lucene INSEE: utiliser OR entre les mots avec guillemets
+        # Format: (denominationUniteLegale:"mot1" OR denominationUniteLegale:"mot2" OR ...)
+        mots = safe_nom.split()
+        
+        # Construire la partie nom avec OR (au moins un des mots doit être présent)
+        nom_parts = [f'denominationUniteLegale:"{mot}"' for mot in mots]
+        nom_query = f"({' OR '.join(nom_parts)})"
+        
         params = {
             "q": (
-                f"denominationUniteLegale:{safe_nom} "
+                f"{nom_query} "
                 f"AND codePostalEtablissement:{safe_cp} "
                 "AND etatAdministratifEtablissement:A"
             ),
