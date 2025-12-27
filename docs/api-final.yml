@@ -1,0 +1,483 @@
+openapi: 3.0.3
+info:
+  title: FOX Reviews - API (Frontend contract)
+  version: "1.0.0"
+  description: |
+    Documentation conçue pour l'équipe frontend — regroupe tous les endpoints
+    exposés par l'API Django REST Framework du projet. Les sections sont
+    organisées par application (auth, users, entreprises, villes, catégories,
+    sous-catégories, search, reviews, billing, sponsorisation, pro-localisations,
+    imports).
+servers:
+  - url: /api
+    description: API base path (local/prod prefix)
+tags:
+  - name: Auth
+    description: Endpoints d'authentification et compte utilisateur
+  - name: Users
+    description: Gestion des utilisateurs
+  - name: Categories
+    description: Catégories et statistiques
+  - name: SousCategories
+    description: Sous-catégories et autocomplétion
+  - name: Villes
+    description: Recherches et lookup villes
+  - name: Entreprises
+    description: Entreprises, recherche inscription, actions liées
+  - name: ProLocalisations
+    description: Pages d'entreprise (sous-catégorie × ville)
+  - name: Reviews
+    description: Avis décryptés / ingestion
+  - name: Billing
+    description: Abonnements, factures et tracking
+  - name: Sponsorisation
+    description: Gestion des sponsorisations
+  - name: Core
+    description: Endpoints utilitaires (ping, export, stripe webhooks)
+paths:
+  /auth/register/:
+    post:
+      tags: [Auth]
+      summary: Créer un compte utilisateur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                email: {type: string}
+                password: {type: string}
+              required: [username, email, password]
+      responses:
+        '201': {description: Utilisateur créé}
+        '400': {description: Données invalides}
+  /auth/login/:
+    post:
+      tags: [Auth]
+      summary: Authentification (login)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                password: {type: string}
+              required: [username, password]
+      responses:
+        '200': {description: OK (token/cookie selon config)}
+        '400': {description: Identifiants invalides}
+  /auth/password-reset/:
+    post:
+      tags: [Auth]
+      summary: Demande de réinitialisation de mot de passe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: {type: string}
+              required: [email]
+      responses:
+        '200': {description: Email envoyé si compte existe}
+  /auth/me/:
+    get:
+      tags: [Auth]
+      summary: Récupère les informations du compte connecté
+      responses:
+        '200':
+          description: Objet utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+  /auth/update/:
+    post:
+      tags: [Auth]
+      summary: Met à jour le profil connecté
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200': {description: Profil mis à jour}
+  /auth-token/:
+    post:
+      tags: [Auth]
+      summary: Obtenir token DRF (deprecated si JWT utilisé)
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                password: {type: string}
+              required: [username, password]
+      responses:
+        '200': {description: {token: string}}
+  /users/:
+    get:
+      tags: [Users]
+      summary: Liste (restreint à l'utilisateur courant)
+      responses:
+        '200':
+          description: "Liste d'utilisateurs (souvent 1: l'utilisateur connecté)"
+    post:
+      tags: [Users]
+      summary: Création utilisateur (admin)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '201': {description: Utilisateur créé}
+  /users/{id}/:
+    get:
+      tags: [Users]
+      summary: Récupère un utilisateur
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
+    put:
+      tags: [Users]
+      summary: Mettre à jour un utilisateur
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UserUpdate'}
+      responses:
+        '200': {description: Profil mis à jour}
+  /users/me/:
+    get:
+      tags: [Users]
+      summary: Alias pour l'utilisateur courant (ViewSet `me` action)
+      responses:
+        '200': {description: Objet utilisateur}
+  /categories/:
+    get:
+      tags: [Categories]
+      summary: Lister les catégories
+      parameters:
+        - in: query
+          name: search
+          schema: {type: string}
+      responses:
+        '200': {description: Liste de catégories}
+    post:
+      tags: [Categories]
+      summary: Créer une catégorie (admin)
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CategorieCreate'}
+      responses:
+        '201': {description: Catégorie créée}
+  /categories/{id}/:
+    get:
+      tags: [Categories]
+      summary: Détail catégorie
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Catégorie détaillée}
+    put:
+      tags: [Categories]
+      summary: Mettre à jour catégorie (admin)
+    delete:
+      tags: [Categories]
+      summary: Supprimer une catégorie (admin)
+  /categories/autocomplete/:
+    get:
+      tags: [Categories]
+      summary: Autocomplete catégories
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Liste réduite pour autocomplétion}
+  /categories/lookup/:
+    get:
+      tags: [Categories]
+      summary: Lookup catégorie par nom exact
+      parameters:
+        - in: query
+          name: nom
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Détail catégorie}
+  /categories/stats/:
+    get:
+      tags: [Categories]
+      summary: Statistiques globales sur les catégories
+      responses:
+        '200': {description: Objets statistiques}
+  /sous-categories/:
+    get:
+      tags: [SousCategories]
+      summary: Lister les sous-catégories
+    post:
+      tags: [SousCategories]
+      summary: Créer une sous-catégorie (admin)
+  /sous-categories/{id}/:
+    get:
+      tags: [SousCategories]
+      summary: Détail sous-catégorie
+    put:
+      tags: [SousCategories]
+      summary: Mettre à jour (admin)
+    delete:
+      tags: [SousCategories]
+      summary: Supprimer (admin)
+  /sous-categories/autocomplete/:
+    get:
+      tags: [SousCategories]
+      summary: Autocomplete sous-catégories
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: {type: string}
+        - in: query
+          name: categorie
+          schema: {type: string}
+  /villes/:
+    get:
+      tags: [Villes]
+      summary: Lister et rechercher villes
+      parameters:
+        - in: query
+          name: q
+          schema: {type: string}
+        - in: query
+          name: code_postal
+          schema: {type: string}
+    post:
+      tags: [Villes]
+      summary: Créer une ville (admin)
+  /villes/{id}/:
+    get:
+      tags: [Villes]
+      summary: Détail ville
+  /villes/autocomplete/:
+    get:
+      tags: [Villes]
+      summary: Autocomplete villes
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: {type: string}
+  /villes/lookup/:
+    get:
+      tags: [Villes]
+      summary: Lookup ville par nom exact et code_postal
+      parameters:
+        - in: query
+          name: nom
+          required: true
+          schema: {type: string}
+        - in: query
+          name: code_postal
+          schema: {type: string}
+  /entreprises/:
+    get:
+      tags: [Entreprises]
+      summary: Lister entreprises (cursor pagination)
+      parameters:
+        - in: query
+          name: search
+          schema: {type: string}
+        - in: query
+          name: is_active
+          schema: {type: boolean}
+    post:
+      tags: [Entreprises]
+      summary: Créer/mettre à jour entreprise (auth requis selon règles)
+  /entreprises/{id}/:
+    get:
+      tags: [Entreprises]
+      summary: Détail entreprise (serializer détaillé)
+  /entreprises/search/:
+    get:
+      tags: [Entreprises]
+      summary: Recherche rapide pour inscription (q, code_postal)
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: {type: string, minLength: 3}
+        - in: query
+          name: code_postal
+          schema: {type: string}
+  /entreprises/{id}/upload_avis/:
+    post:
+      tags: [Entreprises]
+      summary: Upload d'un avis de remplacement (lance IA)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                texte_avis: {type: string}
+              required: [texte_avis]
+      responses:
+        '200': {description: Avis uploadé, génération lancée}
+  /pro-localisations/:
+    get:
+      tags: [ProLocalisations]
+      summary: Lister pro-localisations (cursor pagination)
+    post:
+      tags: [ProLocalisations]
+      summary: Créer pro-localisation (admin/clients)
+  /pro-localisations/{id}/:
+    get:
+      tags: [ProLocalisations]
+      summary: Détail pro-localisation (texte IA, meta, note)
+  /avis-decryptes/:
+    get:
+      tags: [Reviews]
+      summary: Lister avis décryptés
+    post:
+      tags: [Reviews]
+      summary: Créer avis (ingestion IA / admin)
+  /avis-decryptes/{id}/:
+    get:
+      tags: [Reviews]
+      summary: Détail avis
+  /v1/reviews/ingest/:
+    post:
+      tags: [Reviews]
+      summary: Ingestion d'avis (proxy vers agent IA)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source: {type: string}
+                url: {type: string}
+                payload: {type: object}
+      responses:
+        '202': {description: Reçu, traitement asynchrone}
+  /billing/subscription/:
+    get:
+      tags: [Billing]
+      summary: Récupère l'état d'abonnement courant
+  /billing/invoices/:
+    get:
+      tags: [Billing]
+      summary: Récupère la liste des invoices
+  /billing/track/click/:
+    post:
+      tags: [Billing]
+      summary: Tracking click
+  /billing/track/view/:
+    post:
+      tags: [Billing]
+      summary: Tracking view
+  /billing/track/stats/:
+    get:
+      tags: [Billing]
+      summary: Statistiques de tracking
+  /sponsorisations/:
+    get:
+      tags: [Sponsorisation]
+      summary: Lister sponsorisations
+    post:
+      tags: [Sponsorisation]
+      summary: Créer sponsorisation (admin)
+  /sponsorisations/{id}/:
+    get:
+      tags: [Sponsorisation]
+      summary: Détail sponsorisation
+  /ping/:
+    get:
+      tags: [Core]
+      summary: Ping health check
+      responses:
+        '200': {description: OK}
+  /search/:
+    get:
+      tags: [Core]
+      summary: Recherche d'entreprises (API interne utilisée par frontend)
+      parameters:
+        - in: query
+          name: q
+          schema: {type: string}
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id: {type: string}
+        username: {type: string}
+        email: {type: string}
+        first_name: {type: string}
+        last_name: {type: string}
+        profile: {type: object}
+    UserCreate:
+      type: object
+      properties:
+        username: {type: string}
+        email: {type: string}
+        password: {type: string}
+      required: [username, email, password]
+    UserUpdate:
+      type: object
+      properties:
+        first_name: {type: string}
+        last_name: {type: string}
+        phone: {type: string}
+    CategorieCreate:
+      type: object
+      properties:
+        nom: {type: string}
+        description: {type: string}
+        ordre: {type: integer}
+      required: [nom]
+    EntrepriseSummary:
+      type: object
+      properties:
+        id: {type: string}
+        siren: {type: string}
+        nom: {type: string}
+        ville_nom: {type: string}
+    Error:
+      type: object
+      properties:
+        error: {type: string}
+
+# Fin du fichier - ce manifeste est un contrat frontend-friendly minimal.
+# Pour une génération exhaustive et exacte, exécuter `python manage.py spectacular --format yaml` sur le serveur.

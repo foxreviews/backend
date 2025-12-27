@@ -9,6 +9,8 @@ from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 from foxreviews.category.api.serializers import CategorieDetailSerializer
 from foxreviews.category.api.serializers import CategorieSerializer
@@ -52,6 +54,13 @@ class CategorieViewSet(CRUDViewSet):
             return CategorieDetailSerializer
         return self.serializer_class
 
+    @extend_schema(
+        summary="Autocomplete catégories",
+        parameters=[
+            OpenApiParameter(name="q", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Terme de recherche (min 2 caractères)", required=True),
+            OpenApiParameter(name="limit", location=OpenApiParameter.QUERY, type=OpenApiTypes.INT, description="Nombre max de résultats", required=False),
+        ],
+    )
     @action(detail=False, methods=["get"], throttle_classes=[AutocompleteThrottle])
     def autocomplete(self, request):
         """
@@ -119,6 +128,9 @@ class CategorieViewSet(CRUDViewSet):
         serializer = self.get_serializer(categorie)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary="Statistiques globales sur les catégories",
+    )
     @action(detail=False, methods=["get"], throttle_classes=[StatsThrottle])
     def stats(self, request):
         """

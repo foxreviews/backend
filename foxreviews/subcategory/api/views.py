@@ -16,6 +16,8 @@ from foxreviews.core.viewsets import CRUDViewSet
 from foxreviews.subcategory.api.serializers import SousCategorieDetailSerializer
 from foxreviews.subcategory.api.serializers import SousCategorieListSerializer
 from foxreviews.subcategory.models import SousCategorie
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 
 class AutocompleteThrottle(AnonRateThrottle):
@@ -53,6 +55,14 @@ class SousCategorieViewSet(CRUDViewSet):
             return SousCategorieDetailSerializer
         return self.serializer_class
 
+    @extend_schema(
+        summary="Autocomplete sous-catégories",
+        parameters=[
+            OpenApiParameter(name="q", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Terme de recherche (min 2 caractères)", required=True),
+            OpenApiParameter(name="categorie", location=OpenApiParameter.QUERY, type=OpenApiTypes.STR, description="Filtrer par catégorie (UUID)", required=False),
+            OpenApiParameter(name="limit", location=OpenApiParameter.QUERY, type=OpenApiTypes.INT, description="Nombre max de résultats", required=False),
+        ],
+    )
     @action(detail=False, methods=["get"], throttle_classes=[AutocompleteThrottle])
     def autocomplete(self, request):
         """

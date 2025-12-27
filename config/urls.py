@@ -67,6 +67,8 @@ urlpatterns += [
     path("api/account/", include("foxreviews.users.api.urls")),
     # Billing & Tracking
     path("api/billing/", include("foxreviews.billing.urls")),
+    # Reviews document ingestion (proxy -> Agent IA)
+    path("api/v1/reviews/", include("foxreviews.reviews.api.ingestion_urls")),
     # DRF auth token
     path("api/auth-token/", obtain_auth_token, name="obtain_auth_token"),
     path("api/schema/", SpectacularAPIView.as_view(), name="api-schema"),

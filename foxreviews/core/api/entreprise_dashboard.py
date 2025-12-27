@@ -39,8 +39,11 @@ class StatsSerializer(serializers.Serializer):
     impressions = serializers.IntegerField()
     clicks = serializers.IntegerField()
     ctr = serializers.FloatField(help_text="Click-through rate (%)")
-    rotation_position = serializers.IntegerField(
-        help_text="Position dans la rotation (1-5)",
+    rotation_position = serializers.FloatField(
+        help_text=(
+            "Pourcentage estimé d'apparition dans le Top 20 pour ce triplet "
+            "(ville + sous-catégorie), basé sur la mécanique du endpoint /api/search."
+        ),
     )
 
 
@@ -94,14 +97,20 @@ class DashboardResponseSerializer(serializers.Serializer):
 def entreprise_dashboard(request):
     """
     Dashboard pour espace client entreprise.
-    L'utilisateur doit être lié à une entreprise via email_contact.
+    L'utilisateur doit être lié à une entreprise via UserProfile.entreprise.
+    (Fallback legacy: recherche par Entreprise.email_contact == user.email)
     """
-    # Récupérer l'entreprise de l'utilisateur via email
-    entreprise = (
-        Entreprise.objects.filter(email_contact=request.user.email)
-        .select_related()
-        .first()
-    )
+    entreprise = None
+    if hasattr(request.user, "profile"):
+        entreprise = getattr(request.user.profile, "entreprise", None)
+
+    # Fallback legacy: certains comptes historiques étaient reliés via email_contact.
+    if not entreprise:
+        entreprise = (
+            Entreprise.objects.filter(email_contact=request.user.email)
+            .select_related()
+            .first()
+        )
 
     if not entreprise:
         return Response(
@@ -134,6 +143,21 @@ def entreprise_dashboard(request):
         .first()
     )
 
+    # Sponsors actifs sur le triplet (pour position rotation + upgrade)
+    active_sponsors_qs = Sponsorisation.objects.filter(
+        pro_localisation__sous_categorie=pro_loc.sous_categorie,
+        pro_localisation__ville=pro_loc.ville,
+        is_active=True,
+        statut_paiement="active",
+        date_debut__lte=now,
+        date_fin__gte=now,
+    )
+    active_sponsors_count = active_sponsors_qs.count()
+    max_reached = SponsorshipService.check_max_sponsors_reached(
+        str(pro_loc.sous_categorie_id),
+        str(pro_loc.ville_id),
+    )
+
     if sponsorisation:
         subscription_data = {
             "is_sponsored": sponsorisation.is_active
@@ -155,7 +179,9 @@ def entreprise_dashboard(request):
     # Statistiques optimisées
     total_impressions = 0
     total_clicks = 0
-    rotation_position = 0
+    # NOTE: On réutilise le champ `rotation_position` pour exposer un % (stable)
+    # plutôt qu'une position instantanée qui change à chaque appel.
+    rotation_position = 0.0
     ctr = 0.0
 
     if sponsorisation:
@@ -166,19 +192,35 @@ def entreprise_dashboard(request):
         if total_impressions > 0:
             ctr = round((total_clicks / total_impressions) * 100, 2)
 
-        # Position dans la rotation - Requête optimisée avec Count
-        rotation_position = (
-            Sponsorisation.objects.filter(
-                pro_localisation__sous_categorie=pro_loc.sous_categorie,
-                pro_localisation__ville=pro_loc.ville,
-                is_active=True,
-                statut_paiement="active",
-                date_debut__lte=now,
-                date_fin__gte=now,
-                nb_impressions__lt=sponsorisation.nb_impressions,
-            ).count()
-            + 1
+        # Sponsorisé: chance d'apparaître dans le Top 20 via la zone sponsor (max 5)
+        # Si >5 sponsors actifs, approximation "équitable" = 5 / N.
+        sponsored_slots = min(
+            active_sponsors_count,
+            getattr(SponsorshipService, "MAX_SPONSORS_PER_TRIPLET", 5),
         )
+        if active_sponsors_count > 0:
+            rotation_position = round(min(1.0, sponsored_slots / float(active_sponsors_count)) * 100.0, 2)
+        else:
+            rotation_position = 0.0
+    else:
+        # Non sponsorisé: chance d'être dans le Top 20 via la zone organique.
+        # /api/search renvoie 20 résultats/page (5 sponsors max + reste organique).
+        page_size = 20
+        sponsored_slots = min(
+            active_sponsors_count,
+            getattr(SponsorshipService, "MAX_SPONSORS_PER_TRIPLET", 5),
+        )
+        organic_slots = max(0, page_size - sponsored_slots)
+
+        total_results_triplet = ProLocalisation.objects.filter(
+            sous_categorie=pro_loc.sous_categorie,
+            ville=pro_loc.ville,
+            is_active=True,
+        ).count()
+
+        # Dans /api/search, les sponsors "sélectionnés" sont exclus des organiques.
+        organic_pool = max(1, total_results_triplet - sponsored_slots)
+        rotation_position = round(min(1.0, organic_slots / float(organic_pool)) * 100.0, 2)
 
     stats_data = {
         "impressions": total_impressions,
@@ -190,7 +232,6 @@ def entreprise_dashboard(request):
     # Avis actuel
     avis_actuel = (
         AvisDecrypte.objects.filter(pro_localisation=pro_loc)
-        .select_related("pro_localisation")
         .only(
             "texte_decrypte",
             "source",
@@ -212,12 +253,7 @@ def entreprise_dashboard(request):
             "needs_regeneration": avis_actuel.needs_regeneration,
         }
 
-    can_upgrade = not subscription_data[
-        "is_sponsored"
-    ] and not SponsorshipService.check_max_sponsors_reached(
-        str(pro_loc.sous_categorie_id),
-        str(pro_loc.ville_id),
-    )
+    can_upgrade = (not subscription_data["is_sponsored"]) and (not max_reached)
 
     return Response(
         {

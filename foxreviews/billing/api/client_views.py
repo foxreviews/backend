@@ -15,6 +15,20 @@ from foxreviews.enterprise.models import Entreprise
 logger = logging.getLogger(__name__)
 
 
+def _get_authenticated_user_entreprise(request):
+    """Retourne l'entreprise liée au compte.
+
+    Source de vérité: UserProfile.entreprise.
+    Fallback legacy: Entreprise.email_contact == user.email.
+    """
+    if hasattr(request.user, "profile"):
+        entreprise = getattr(request.user.profile, "entreprise", None)
+        if entreprise:
+            return entreprise
+
+    return Entreprise.objects.filter(email_contact=request.user.email).first()
+
+
 # Serializers
 class SubscriptionSerializer(serializers.ModelSerializer):
     """Serializer pour Subscription."""
@@ -82,10 +96,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
 def list_subscriptions(request):
     """Liste les abonnements de l'utilisateur."""
     try:
-        # Récupérer l'entreprise de l'utilisateur
-        entreprise = Entreprise.objects.filter(
-            pro_localisations__subscriptions__user=request.user
-        ).first()
+        entreprise = _get_authenticated_user_entreprise(request)
         
         if not entreprise:
             return Response(
@@ -157,10 +168,7 @@ def subscription_detail(request, subscription_id):
 def list_invoices(request):
     """Liste les factures de l'utilisateur."""
     try:
-        # Récupérer l'entreprise de l'utilisateur
-        entreprise = Entreprise.objects.filter(
-            pro_localisations__subscriptions__user=request.user
-        ).first()
+        entreprise = _get_authenticated_user_entreprise(request)
         
         if not entreprise:
             return Response(
@@ -197,10 +205,7 @@ def list_invoices(request):
 def invoice_detail(request, invoice_id):
     """Détails d'une facture."""
     try:
-        # Récupérer l'entreprise de l'utilisateur
-        entreprise = Entreprise.objects.filter(
-            pro_localisations__subscriptions__user=request.user
-        ).first()
+        entreprise = _get_authenticated_user_entreprise(request)
         
         if not entreprise:
             return Response(

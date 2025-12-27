@@ -41,17 +41,6 @@ http:
         # https://doc.traefik.io/traefik/routing/routers/#certresolver
         certResolver: letsencrypt
 
-    web-secure-router:
-      rule: 'Host(`fox-reviews.com`) || Host(`www.fox-reviews.com`)'
-      entryPoints:
-        - web-secure
-      middlewares:
-        - csrf
-      service: django
-      tls:
-        # https://doc.traefik.io/traefik/routing/routers/#certresolver
-        certResolver: letsencrypt
-
     flower-secure-router:
       rule: 'Host(`api.fox-reviews.com`)'
       entryPoints:
@@ -60,6 +49,20 @@ http:
       tls:
         # https://doc.traefik.io/traefik/master/routing/routers/#certresolver
         certResolver: letsencrypt
+    
+    entreprisefrance-secure-router:
+      rule: 'Host(`entreprisefrance.avis-pros.com`)'
+      entryPoints:
+        - web-secure
+      service: entreprisefrance-frontend
+      tls:
+        certResolver: letsencrypt
+
+    entreprisefrance-http-router:
+      rule: 'Host(`entreprisefrance.avis-pros.com`)'
+      entryPoints:
+        - web
+      service: entreprisefrance-frontend
 
   middlewares:
     csrf:
@@ -78,6 +81,11 @@ http:
       loadBalancer:
         servers:
           - url: http://flower:5555
+
+    entreprisefrance-frontend:
+      loadBalancer:
+        servers:
+          - url: http://entreprisefrance:3022
 
 providers:
   # https://doc.traefik.io/traefik/master/providers/file/
