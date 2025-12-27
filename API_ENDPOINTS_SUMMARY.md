@@ -79,6 +79,8 @@
 |---------|----------|------|-------------|
 | `GET` | `/api/dashboard/` | ✅ Token | Dashboard entreprise client |
 
+Note: `stats.rotation_position` est un **pourcentage estimé d'apparition dans le Top 20** (0–100), basé sur la mécanique de `/api/search`.
+
 ---
 
 ## 📦 Autres endpoints existants

@@ -31,6 +31,8 @@ services:
       dockerfile: ./compose/production/postgres/Dockerfile
     image: foxreviews_production_postgres
     shm_size: "2gb"
+    ports:
+      - "10.8.0.1:5432:5432"
     volumes:
       - production_postgres_data:/var/lib/postgresql/18/docker
       - production_postgres_data_backups:/backups

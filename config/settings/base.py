@@ -542,5 +542,10 @@ AI_API_BASE_URL = env.str("AI_API_BASE_URL", default="http://localhost:8080/api/
 AI_API_KEY = env.str("AI_API_KEY", default="")
 AI_API_TIMEOUT = env.int("AI_API_TIMEOUT", default=30)
 
+# Agent IA (recommandé) - utilisé par AIRequestService + endpoints d'ingestion
+AI_SERVICE_URL = env.str("AI_SERVICE_URL", default="http://agent_app_local:8000")
+AI_SERVICE_API_KEY = env.str("AI_SERVICE_API_KEY", default="")
+AI_SERVICE_TIMEOUT = env.int("AI_SERVICE_TIMEOUT", default=60)
+
 # Your stuff...
 # ------------------------------------------------------------------------------

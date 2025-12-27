@@ -1,6 +1,7 @@
 # ruff: noqa: E501
 import logging
 import os
+import warnings
 
 import sentry_sdk
 from sentry_sdk.integrations.celery import CeleryIntegration
@@ -14,6 +15,21 @@ from .base import INSTALLED_APPS
 from .base import REDIS_URL
 from .base import SPECTACULAR_SETTINGS
 from .base import env
+
+
+# ------------------------------------------------------------------------------
+# ASGI + WhiteNoise
+# ------------------------------------------------------------------------------
+# En production on sert Django via ASGI (gunicorn + uvicorn worker) pour supporter
+# les websockets. WhiteNoise est un middleware WSGI-oriented et, sous ASGI, Django
+# émet un warning à chaque réponse streamée (typiquement /static/* de l'admin).
+# Ce warning est non-bloquant mais spamme les logs.
+warnings.filterwarnings(
+    "ignore",
+    message=r"StreamingHttpResponse must consume synchronous iterators.*",
+    category=Warning,
+    module=r"django\.core\.handlers\.asgi",
+)
 
 # GENERAL
 # ------------------------------------------------------------------------------
