@@ -24,6 +24,7 @@ from foxreviews.core.permissions import IsAuthenticatedOrReadOnly
 from foxreviews.core.viewsets import CRUDViewSet
 from foxreviews.enterprise.api.serializers import EntrepriseDetailSerializer
 from foxreviews.enterprise.api.serializers import EntrepriseListSerializer
+from foxreviews.enterprise.api.serializers import EntrepriseSearchSerializer
 from foxreviews.enterprise.api.serializers import ProLocalisationDetailSerializer
 from foxreviews.enterprise.api.serializers import ProLocalisationListSerializer
 from foxreviews.enterprise.models import Entreprise
@@ -97,6 +98,72 @@ class EntrepriseViewSet(CRUDViewSet):
         if self.action == "retrieve":
             return EntrepriseDetailSerializer
         return self.serializer_class
+
+    @extend_schema(
+        summary="Recherche d'entreprises pour inscription",
+        description="Recherche publique d'entreprises par nom et code postal. "
+                    "Utilisé par le formulaire d'inscription pour trouver l'entreprise avant création de compte.",
+        parameters=[
+            {
+                "name": "q",
+                "in": "query",
+                "description": "Nom de l'entreprise à rechercher (minimum 3 caractères)",
+                "required": True,
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "code_postal",
+                "in": "query",
+                "description": "Code postal pour affiner la recherche (optionnel)",
+                "required": False,
+                "schema": {"type": "string"},
+            },
+        ],
+        responses={
+            200: OpenApiResponse(
+                description="Liste des entreprises trouvées avec leurs ProLocalisations",
+                response=EntrepriseSearchSerializer(many=True),
+            ),
+            400: OpenApiResponse(description="Paramètres de recherche invalides"),
+        },
+        tags=["Entreprises"],
+    )
+    @action(detail=False, methods=["get"], permission_classes=[])
+    def search(self, request):
+        """
+        Recherche publique d'entreprises pour l'inscription.
+        Retourne toutes les entreprises matchantes avec leurs ProLocalisations actives.
+        """
+        query = request.query_params.get("q", "").strip()
+        code_postal = request.query_params.get("code_postal", "").strip()
+
+        if not query or len(query) < 3:
+            return Response(
+                {"error": "Le nom de l'entreprise doit contenir au moins 3 caractères"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Recherche sur toutes les entreprises actives (pas de filtrage sur avis)
+        queryset = Entreprise.objects.filter(is_active=True).prefetch_related(
+            'pro_localisations__sous_categorie',
+            'pro_localisations__ville',
+        )
+
+        # Recherche par nom (insensible à la casse)
+        queryset = queryset.filter(nom__icontains=query)
+
+        # Filtrer par code postal si fourni
+        if code_postal:
+            queryset = queryset.filter(code_postal=code_postal)
+
+        # Limiter à 20 résultats pour éviter surcharge
+        queryset = queryset[:20]
+
+        serializer = EntrepriseSearchSerializer(queryset, many=True)
+        return Response({
+            "results": serializer.data,
+            "count": len(serializer.data),
+        })
 
     @extend_schema(
         summary="Upload avis de remplacement",

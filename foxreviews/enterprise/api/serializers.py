@@ -59,6 +59,54 @@ class EntrepriseDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
+class EntrepriseSearchSerializer(serializers.ModelSerializer):
+    """Serializer pour recherche d'entreprise avec ProLocalisations (inscription client)."""
+
+    pro_localisations = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Entreprise
+        fields = [
+            "id",
+            "siren",
+            "siret",
+            "nom",
+            "nom_commercial",
+            "adresse",
+            "code_postal",
+            "ville_nom",
+            "naf_code",
+            "pro_localisations",
+        ]
+
+    def get_pro_localisations(self, obj):
+        """Retourne les ProLocalisations actives avec détails pour le dashboard."""
+        pro_locs = obj.pro_localisations.filter(is_active=True).select_related(
+            'sous_categorie', 'ville'
+        )
+        
+        return [
+            {
+                "id": pl.id,
+                "sous_categorie": {
+                    "id": pl.sous_categorie.id,
+                    "nom": pl.sous_categorie.nom,
+                    "slug": pl.sous_categorie.slug,
+                } if pl.sous_categorie else None,
+                "ville": {
+                    "id": pl.ville.id,
+                    "nom": pl.ville.nom,
+                    "slug": pl.ville.slug,
+                    "code_postal": pl.ville.code_postal_principal,
+                } if pl.ville else None,
+                "note_moyenne": float(pl.note_moyenne) if pl.note_moyenne else None,
+                "nb_avis": pl.nb_avis,
+                "is_verified": pl.is_verified,
+            }
+            for pl in pro_locs
+        ]
+
+
 class ProLocalisationListSerializer(serializers.ModelSerializer):
     """Serializer pour liste de ProLocalisation."""
 
