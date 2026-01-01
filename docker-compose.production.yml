@@ -61,7 +61,7 @@ services:
       - "traefik.http.routers.api-https.tls.certresolver=letsencrypt"
 
   redis:
-    image: docker.io/redis:7.2
+    image: docker.io/redis:8.4
     
     volumes:
       - production_redis_data:/data
